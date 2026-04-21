@@ -1,0 +1,46 @@
+services:
+
+  # ── Backend (FastAPI + Uvicorn) ──────────────────────────────────────────────
+  backend:
+    env_file: .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hardware-hub-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Named volume persists the SQLite database file across container
+      # restarts and re-deployments.  The path /app/data matches the location
+      # used by SQLAlchemy in the connection string (added in Step 2).
+      - sqlite_data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── Frontend (Vue.js + Vite, served by nginx) ────────────────────────────────
+  # Multi-stage build: Node 22 compiles the Vite/Vue app, then nginx:alpine
+  # serves the static bundle and proxies /api/* to the backend container.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hardware-hub-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  # Named volume definition.  Docker manages the actual host path; this ensures
+  # the SQLite database file (/app/data/hardware.db) is durable.
+  sqlite_data:
+    name: hardware-hub-sqlite-data
