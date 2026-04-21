@@ -5,12 +5,17 @@ the core health-check endpoint used by the Docker orchestration layer to confirm
 that the service is up and ready to accept traffic.
 """
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.database import init_db
+from backend.database import SessionLocal, init_db
 from backend.routers import admin, ai, auth, hardware, rentals
+from backend.services.bootstrap import bootstrap_admin
+
+logging.basicConfig(level=logging.INFO)
 
 app: FastAPI = FastAPI(
     title="Hardware Hub API",
@@ -41,12 +46,20 @@ app.include_router(ai.router)
 
 @app.on_event("startup")
 def on_startup() -> None:
-    """Initialise the database tables on application startup.
+    """Initialise the database and run the admin bootstrap on startup.
 
-    Runs ``Base.metadata.create_all`` once when the Uvicorn worker starts.
-    This is idempotent — existing tables are not modified.
+    Steps:
+        1. ``init_db`` — creates all tables and applies SQLite column
+           compatibility patches (idempotent).
+        2. ``bootstrap_admin`` — ensures a first admin account exists
+           according to the ``BOOTSTRAP_ADMIN_*`` environment variables.
     """
     init_db()
+    db = SessionLocal()
+    try:
+        bootstrap_admin(db)
+    finally:
+        db.close()
 
 
 @app.get(

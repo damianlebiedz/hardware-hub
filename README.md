@@ -60,6 +60,11 @@ Optional:
 - `GEMINI_MODEL` (default: `gemini-1.5-flash`)
 - `DATABASE_URL` (default: `sqlite:////app/data/hardware.db`)
 
+**Bootstrap admin** (see [Admin Bootstrap](#admin-bootstrap) below):
+- `BOOTSTRAP_ADMIN_ENABLED` (default: `true`)
+- `BOOTSTRAP_ADMIN_EMAIL` (required when enabled)
+- `BOOTSTRAP_ADMIN_PASSWORD` (required when enabled, min 8 chars)
+
 #### 4) Start backend (FastAPI)
 
 ```bash
@@ -159,6 +164,38 @@ In an AI-augmented world, choosing *how* to use AI is as important as using it a
 
 As this is a timeboxed MVP, certain architectural trade-offs were made intentionally to prioritize a rock-solid core business logic.
 
+### Admin Bootstrap
+
+Because `/api/admin/users` itself requires admin role, a fresh database would make initial setup impossible.  
+The backend resolves this by automatically creating (or promoting) the first admin user on every startup.
+
+#### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `BOOTSTRAP_ADMIN_ENABLED` | `true` | Set to `false` to disable the routine entirely (e.g. in CI). |
+| `BOOTSTRAP_ADMIN_EMAIL` | — | Email of the bootstrap admin account. Required when enabled. |
+| `BOOTSTRAP_ADMIN_PASSWORD` | — | Password for a **new** bootstrap account (min 8 chars). Not used if the user already exists. Required when enabled. |
+
+A ready-to-copy template of all variables is in [`.env.example`](.env.example).
+
+#### Startup behaviour (idempotent)
+
+| Condition | Action | Log message |
+|---|---|---|
+| `BOOTSTRAP_ADMIN_ENABLED=false` | Skip entirely | `[bootstrap] Admin bootstrap is disabled` |
+| Enabled, user not found | Create new admin with hashed password | `[bootstrap] Admin user '...' created successfully` |
+| Enabled, user exists, role ≠ admin | Promote role to `admin` (password unchanged) | `[bootstrap] Existing user '...' promoted to admin role` |
+| Enabled, user exists, role = admin | No-op | `[bootstrap] Admin user '...' already exists — no changes made` |
+| Enabled, email or password missing | **Abort startup** with `RuntimeError` | Clear error in startup log |
+
+#### Security
+
+- The bootstrap password is hashed with bcrypt via the same `hash_password()` utility used everywhere else.
+- The plaintext password is read once from the environment and never logged or stored.
+
+---
+
 ### Authentication Hack (What / How / Why)
 
 **What:** We intentionally do not use JWT/OAuth2/OIDC yet.  
@@ -198,6 +235,8 @@ Implementing full token/session lifecycle security (JWT/OIDC, refresh, revocatio
 During this task, an initial implementation idea used direct string comparison between stored and incoming passwords in the login flow. That approach is insecure because it implies storing plaintext passwords or reversible secrets. I caught the issue when validating the security requirements (`password_hash` only, generic 401 responses, and no secret leakage) and replaced it with `passlib[bcrypt]` hashing plus `verify_password()`.
 
 I also corrected the login error behavior: a first draft differentiated "email not found" from "wrong password". That leaks account existence. The final behavior always returns a generic `401 Invalid credentials` for unknown emails, wrong passwords, and legacy users missing a hash.
+
+**Bootstrap task (admin bootstrap):** During implementation of the admin bootstrap routine, the first draft read `BOOTSTRAP_ADMIN_PASSWORD` from the environment and wrote a confirmation log line of the form `"Bootstrap password set to: <value>"` to make the startup output easy to read during development. That approach would have exposed the plaintext admin credential in container logs — a critical security issue in any environment where stdout is collected (Docker, cloud log aggregators, CI). The issue was caught before commit by reviewing what the log line would contain. The fix was straightforward: log only the email address and the action taken (created / promoted / already exists), and never reference the password value at any point after it has been passed to `hash_password()`.
 
 ### The Prompt Trail
 
