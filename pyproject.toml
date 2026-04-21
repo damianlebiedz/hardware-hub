@@ -1,0 +1,22 @@
+[project]
+name = "hardware-hub"
+version = "0.1.0"
+description = "Internal hardware rental management MVP"
+authors = [
+    {name = "Hardware Hub Team"}
+]
+readme = "README.md"
+requires-python = "^3.12"
+dependencies = [
+    "fastapi (>=0.136.0,<0.137.0)",
+    "uvicorn (>=0.45.0,<0.46.0)",
+    "sqlalchemy (>=2.0.49,<3.0.0)",
+    "pydantic (>=2.13.3,<3.0.0)",
+    "pytest (>=9.0.3,<10.0.0)",
+    "google-generativeai (>=0.8.6,<0.9.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
