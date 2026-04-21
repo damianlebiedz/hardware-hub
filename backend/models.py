@@ -23,6 +23,7 @@ class User(Base):
         id: Auto-incremented primary key.
         email: Unique email address used as the login identifier.
         role: Either ``'admin'`` (full access) or ``'user'`` (self-service only).
+        password_hash: Bcrypt hash used for password verification.
         rentals: Back-populated list of ``Rental`` records for this user.
     """
 
@@ -31,6 +32,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     role: Mapped[str] = mapped_column(String, nullable=False, default="user")
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
 
     rentals: Mapped[list[Rental]] = relationship(
         "Rental", back_populates="user", cascade="all, delete-orphan"

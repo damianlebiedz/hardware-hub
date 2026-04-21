@@ -9,7 +9,7 @@ exploited by the test suite to substitute an in-memory SQLite database.
 import os
 from collections.abc import Generator
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DATABASE_URL: str = os.getenv(
@@ -46,6 +46,20 @@ def init_db() -> None:
         MVP ``create_all`` is sufficient.
     """
     Base.metadata.create_all(bind=engine)
+    _ensure_users_password_hash_column()
+
+
+def _ensure_users_password_hash_column() -> None:
+    """Add ``users.password_hash`` for pre-auth-migration SQLite databases."""
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    with engine.begin() as connection:
+        columns: list[str] = [
+            row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
+        ]
+        if "password_hash" not in columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR"))
 
 
 def get_db() -> Generator[Session, None, None]:

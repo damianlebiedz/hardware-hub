@@ -46,13 +46,14 @@ async function request(method, path, body) {
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 
-/** Log in with an email address (MVP — no password). */
-export const login = (email) => request('POST', '/auth/login', { email })
+/** Log in with email and password. */
+export const login = (email, password) => request('POST', '/auth/login', { email, password })
 
 // ── Admin ───────────────────────────────────────────────────────────────────
 
 /** Create a new user account (admin only). */
-export const createUser = (email, role) => request('POST', '/admin/users', { email, role })
+export const createUser = (email, role, password) =>
+  request('POST', '/admin/users', { email, role, password })
 
 // ── Hardware ─────────────────────────────────────────────────────────────────
 

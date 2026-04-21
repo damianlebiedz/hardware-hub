@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import User
 from backend.schemas import UserCreate, UserRead
+from backend.security import hash_password
 
 router: APIRouter = APIRouter(prefix="/api/admin", tags=["Admin"])
 
@@ -55,7 +56,7 @@ def create_user(
     """Register a new user account in the system.
 
     Args:
-        payload: JSON body containing ``email`` and optional ``role``
+        payload: JSON body containing ``email``, ``password`` and optional ``role``
             (defaults to ``'user'``).
         db: Injected SQLAlchemy session.
         x_user_role: Value of the ``X-User-Role`` request header; must be
@@ -70,7 +71,11 @@ def create_user(
     """
     _require_admin(x_user_role)
 
-    user: User = User(email=str(payload.email), role=payload.role)
+    user: User = User(
+        email=str(payload.email),
+        role=payload.role,
+        password_hash=hash_password(payload.password),
+    )
     db.add(user)
     try:
         db.commit()

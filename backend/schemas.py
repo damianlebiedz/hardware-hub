@@ -27,10 +27,13 @@ class UserCreate(BaseModel):
     Attributes:
         email: Valid email address; must be unique in the database.
         role: Access level — either ``'admin'`` or ``'user'``.
+        password: Plain-text password accepted on creation and hashed before
+            persistence.
     """
 
     email: EmailStr
     role: Literal["admin", "user"] = Field(default="user")
+    password: str = Field(..., min_length=8)
 
 
 class UserRead(BaseModel):

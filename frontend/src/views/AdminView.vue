@@ -9,7 +9,7 @@
       <div class="card">
         <h2>Add User</h2>
         <p class="text-muted mt-1" style="margin-bottom:1rem;">
-          Create a new account. The user can then sign in via their email.
+          Create a new account with a password. Passwords are hashed server-side.
         </p>
 
         <form @submit.prevent="handleCreateUser">
@@ -24,6 +24,11 @@
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
+          </div>
+          <div class="form-group mt-1">
+            <label for="new-password">Temporary password</label>
+            <input id="new-password" v-model="newPassword" type="password" class="input"
+                   placeholder="At least 8 characters" required minlength="8" />
           </div>
 
           <div v-if="userError"   class="alert alert-error mt-2">{{ userError }}</div>
@@ -95,6 +100,7 @@ const SEED_DATA = [
 // ── Add user state ──────────────────────────────────────────────────────────
 const newEmail    = ref('')
 const newRole     = ref('user')
+const newPassword = ref('')
 const userLoading = ref(false)
 const userError   = ref('')
 const userSuccess = ref('')
@@ -103,10 +109,11 @@ async function handleCreateUser() {
   userError.value = userSuccess.value = ''
   userLoading.value = true
   try {
-    const user = await createUser(newEmail.value.trim(), newRole.value)
+    const user = await createUser(newEmail.value.trim(), newRole.value, newPassword.value)
     userSuccess.value = `User "${user.email}" created with role "${user.role}".`
     newEmail.value = ''
     newRole.value  = 'user'
+    newPassword.value = ''
   } catch (err) {
     userError.value = err.message || 'Failed to create user.'
   } finally {

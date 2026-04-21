@@ -1,16 +1,22 @@
 """Authentication router for Hardware Hub.
 
-SECURITY NOTE — MVP HACK
-------------------------
-This module intentionally bypasses production-grade authentication for the
-sake of rapid prototyping.  The login endpoint accepts a plain-text email
-address, looks it up in the ``users`` table, and returns the full user
-object.  There is **no password hashing**, **no JWT issuance**, and **no
-session management**.  The frontend stores the returned object in
-``localStorage`` and passes the ``user_id`` in subsequent requests.
+SECURITY NOTE — MVP HACK (STILL IN PLACE)
+-----------------------------------------
+This module now verifies ``email + password`` using secure password hashes,
+but it still intentionally skips production-grade session/auth infrastructure.
 
-**This approach MUST be replaced with proper authentication (e.g. OAuth2 /
-JWT with hashed passwords) before any production or public deployment.**
+Current MVP behavior:
+* Login returns the user profile object on success.
+* The frontend stores that object in ``localStorage``.
+* Subsequent requests rely on role/user context passed from the client side.
+
+What is still missing:
+* No JWT/OAuth2/OIDC token flow.
+* No HTTP-only secure session cookies.
+* No server-side token/session invalidation lifecycle.
+
+This shortcut is acceptable for the MVP scope but **must be replaced** before
+production deployment.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,44 +26,34 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import User
 from backend.schemas import UserRead
+from backend.security import verify_password
 
 router: APIRouter = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 
 class LoginRequest(BaseModel):
-    """Payload for the MVP login endpoint.
+    """Payload for the login endpoint.
 
     Attributes:
-        email: The email address to look up in the ``users`` table.
-
-    Note:
-        No password field is present.  This is a deliberate MVP shortcut —
-        see the module-level security warning above.
+        email: User login email.
+        password: Plain-text password to verify against ``password_hash``.
     """
 
     email: EmailStr
+    password: str
 
 
 @router.post(
     "/login",
     response_model=UserRead,
-    summary="MVP login (email-only, no password)",
+    summary="Login with email and password",
     responses={
-        200: {"description": "User found — object returned for localStorage storage."},
-        404: {"description": "No user with this email address exists."},
+        200: {"description": "Credentials valid; user object returned."},
+        401: {"description": "Invalid credentials."},
     },
 )
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> User:
-    """Authenticate a user by email address and return their user record.
-
-    .. warning::
-        **MVP SECURITY HACK** — This endpoint performs no password verification
-        and issues no token.  It simply checks whether the supplied email exists
-        in the database and returns the matching row.  The Vue.js frontend is
-        expected to store this object in ``localStorage`` and include the
-        ``user_id`` in subsequent API calls.  This shortcut was chosen to
-        eliminate auth infrastructure overhead during the initial MVP sprint and
-        **must not be used in a production environment**.
+    """Authenticate by email+password and return user profile on success.
 
     Args:
         payload: JSON body containing the ``email`` field.
@@ -68,12 +64,17 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> User:
         :class:`~backend.schemas.UserRead`.
 
     Raises:
-        HTTPException (404): If no user with the supplied email exists.
+        HTTPException (401): If credentials are invalid.
     """
     user: User | None = db.query(User).filter(User.email == payload.email).first()
-    if user is None:
+    if user is None or user.password_hash is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No user found with email '{payload.email}'.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials.",
+        )
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials.",
         )
     return user

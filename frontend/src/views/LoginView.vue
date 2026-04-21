@@ -21,6 +21,20 @@
           />
         </div>
 
+        <div class="form-group mt-1">
+          <label for="password">Password</label>
+          <input
+            id="password"
+            v-model="password"
+            type="password"
+            class="input"
+            placeholder="Enter your password"
+            required
+            minlength="8"
+            autocomplete="current-password"
+          />
+        </div>
+
         <div v-if="error" class="alert alert-error mt-2">{{ error }}</div>
 
         <button type="submit" class="btn btn-primary w-full mt-2" :disabled="loading">
@@ -29,9 +43,6 @@
         </button>
       </form>
 
-      <p class="text-muted mt-2" style="font-size:.75rem; text-align:center;">
-        MVP mode — no password required.
-      </p>
     </div>
   </div>
 </template>
@@ -43,6 +54,7 @@ import { login } from '../api/client.js'
 
 const router  = useRouter()
 const email   = ref('')
+const password = ref('')
 const loading = ref(false)
 const error   = ref('')
 
@@ -50,11 +62,12 @@ async function handleLogin() {
   error.value   = ''
   loading.value = true
   try {
-    const user = await login(email.value.trim())
+    const user = await login(email.value.trim(), password.value)
     localStorage.setItem('hardware_hub_user', JSON.stringify(user))
+    password.value = ''
     router.push('/dashboard')
   } catch (err) {
-    error.value = err.message || 'Login failed. Check the email address.'
+    error.value = 'Invalid credentials'
   } finally {
     loading.value = false
   }
