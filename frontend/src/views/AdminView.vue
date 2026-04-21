@@ -45,32 +45,45 @@
       <div class="card">
         <h2>AI Seed Import</h2>
         <p class="text-muted mt-1" style="margin-bottom:1rem;">
-          Send the bundled legacy dataset through the Gemini AI sanitizer and
-          bulk-insert the cleaned records into the database.
+          Upload a legacy JSON file, then send it through the Gemini AI sanitizer
+          to bulk-insert cleaned records into the database.
         </p>
 
-        <div class="alert alert-info" style="margin-bottom:1rem;">
-          <strong>{{ SEED_DATA.length }} records</strong> will be sent to Gemini
-          for cleaning (typo correction, date normalisation, status mapping,
+        <div class="form-group" style="margin-bottom:1rem;">
+          <label for="seed-file">Seed JSON file</label>
+          <input
+            id="seed-file"
+            type="file"
+            class="input"
+            accept=".json,application/json"
+            :disabled="seedLoading"
+            @change="handleSeedFileChange"
+          />
+        </div>
+
+        <div v-if="seedRecordCount > 0" class="alert alert-info" style="margin-bottom:1rem;">
+          <strong>{{ seedRecordCount }} records</strong> from
+          <strong>{{ seedFileName }}</strong> are ready to be sent to Gemini
+          for cleaning (typo correction, date normalization, status mapping,
           duplicate ID resolution) then inserted into the hardware table.
         </div>
 
         <div v-if="seedError"   class="alert alert-error">{{ seedError }}</div>
         <div v-if="seedSuccess" class="alert alert-success">{{ seedSuccess }}</div>
 
-        <button class="btn btn-primary" :disabled="seedLoading" @click="handleSeedImport">
+        <button class="btn btn-primary" :disabled="seedLoading || seedRecordCount === 0" @click="handleSeedImport">
           <span v-if="seedLoading" class="spinner"></span>
           {{ seedLoading ? 'Importing via AI…' : '⚡ Run AI Seed Import' }}
         </button>
 
         <!-- Preview of raw data that will be sent -->
-        <details style="margin-top:1rem;">
+        <details v-if="seedRecordCount > 0" style="margin-top:1rem;">
           <summary class="text-muted" style="cursor:pointer; font-size:.8rem;">
             Show raw data preview
           </summary>
           <pre style="font-size:.72rem; overflow:auto; max-height:220px; margin-top:.5rem;
                       background:var(--bg); padding:.75rem; border-radius:var(--radius);
-                      border:1px solid var(--border);">{{ JSON.stringify(SEED_DATA, null, 2) }}</pre>
+                      border:1px solid var(--border);">{{ JSON.stringify(seedPayload, null, 2) }}</pre>
         </details>
       </div>
 
@@ -81,21 +94,6 @@
 <script setup>
 import { ref } from 'vue'
 import { createUser, aiSeed } from '../api/client.js'
-
-// ── Hardcoded raw legacy dataset (sent as-is to the AI sanitizer) ──────────
-const SEED_DATA = [
-  { id: 1,  name: 'Apple iPhone 13 Pro Max',  brand: 'Apple',   purchaseDate: '2021-11-23', status: 'Available' },
-  { id: 2,  name: 'Apple MacBook Pro 13',      brand: 'Apple',   purchaseDate: '2021-12-20', status: 'In Use' },
-  { id: 3,  name: 'Razer Basilisk V2',         brand: 'Razer',   purchaseDate: '2021-06-05', status: 'Repair' },
-  { id: 4,  name: 'SAMSUNG Galaxy S21',        brand: 'Samsung', purchaseDate: '2021-11-23', status: 'Available' },
-  { id: 5,  name: 'Dell XPS 15 9510',          brand: 'Dell',    purchaseDate: '2022-03-15', status: 'Available', notes: 'Battery swelling, do not issue without service.' },
-  { id: 6,  name: 'Logitech MX Master 3',      brand: 'Logitech',purchaseDate: '2027-10-10', status: 'Available' },
-  { id: 7,  name: 'Sony WH-1000XM4',           brand: 'Sony',    purchaseDate: '2022-01-12', status: 'In Use',   assignedTo: 'j.doe@booksy.com' },
-  { id: 4,  name: 'Duplicate ID Test Laptop',  brand: 'Lenovo',  purchaseDate: '2023-01-01', status: 'Repair' },
-  { id: 9,  name: 'iPad Pro 12.9',             brand: 'Appel',   purchaseDate: '22-05-2023', status: 'Available' },
-  { id: 10, name: 'Unknown Device',            brand: '',        purchaseDate: null,         status: 'Unknown' },
-  { id: 11, name: 'MacBook Air M2',            brand: 'Apple',   purchaseDate: '2023-08-01', status: 'Available', history: 'Returned by user with liquid damage. Keyboard sticky.' },
-]
 
 // ── Add user state ──────────────────────────────────────────────────────────
 const newEmail    = ref('')
@@ -125,12 +123,42 @@ async function handleCreateUser() {
 const seedLoading = ref(false)
 const seedError   = ref('')
 const seedSuccess = ref('')
+const seedPayload = ref([])
+const seedFileName = ref('')
+const seedRecordCount = ref(0)
+
+async function handleSeedFileChange(event) {
+  seedError.value = seedSuccess.value = ''
+  seedPayload.value = []
+  seedRecordCount.value = 0
+  seedFileName.value = ''
+
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  try {
+    const rawText = await file.text()
+    const parsed = JSON.parse(rawText)
+    if (!Array.isArray(parsed)) {
+      throw new Error('Seed file must contain a JSON array.')
+    }
+    seedPayload.value = parsed
+    seedRecordCount.value = parsed.length
+    seedFileName.value = file.name
+  } catch (err) {
+    seedError.value = err.message || 'Failed to parse JSON file.'
+  }
+}
 
 async function handleSeedImport() {
   seedError.value = seedSuccess.value = ''
+  if (seedRecordCount.value === 0) {
+    seedError.value = 'Upload a JSON file with at least one record first.'
+    return
+  }
   seedLoading.value = true
   try {
-    const result = await aiSeed(SEED_DATA)
+    const result = await aiSeed(seedPayload.value)
     seedSuccess.value = `✓ Inserted ${result.inserted} record(s) after AI sanitization.`
   } catch (err) {
     seedError.value = err.message || 'AI seed import failed.'

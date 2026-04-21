@@ -238,6 +238,8 @@ I also corrected the login error behavior: a first draft differentiated "email n
 
 **Bootstrap task (admin bootstrap):** During implementation of the admin bootstrap routine, the first draft read `BOOTSTRAP_ADMIN_PASSWORD` from the environment and wrote a confirmation log line of the form `"Bootstrap password set to: <value>"` to make the startup output easy to read during development. That approach would have exposed the plaintext admin credential in container logs — a critical security issue in any environment where stdout is collected (Docker, cloud log aggregators, CI). The issue was caught before commit by reviewing what the log line would contain. The fix was straightforward: log only the email address and the action taken (created / promoted / already exists), and never reference the password value at any point after it has been passed to `hash_password()`.
 
+**Seed import UX bug (frontend hardcoding):** An AI-generated frontend draft hardcoded the entire "legacy seed" JSON directly inside `AdminView.vue` and sent that embedded constant to `/api/ai/seed`. That was a design error: users could not upload their own seed file, and the shipped frontend bundle effectively became the source of truth for migration input. This was corrected by removing the hardcoded dataset and adding a JSON file picker (`.json` / `application/json`) in the Admin panel. The selected file is parsed client-side, validated to be a JSON array, previewed, and only then sent to the backend when the admin clicks the import button.
+
 ### The Prompt Trail
 
 <details>
