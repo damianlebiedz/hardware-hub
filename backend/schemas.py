@@ -14,7 +14,7 @@ schema so that SQLAlchemy ORM instances can be passed directly to
 from __future__ import annotations
 
 import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -178,6 +178,37 @@ class SeedResponse(BaseModel):
     inserted: int
     items: list[HardwareRead]
     changes: list[SeedRecordChange] = Field(default_factory=list)
+
+
+# ── Plain Seed ─────────────────────────────────────────────────────────────────
+
+
+class PlainSeedRejection(BaseModel):
+    """Describes a single record rejected during plain seed import.
+
+    Attributes:
+        index: Zero-based position of the record in the original raw payload.
+        record: The raw record that failed validation.
+        reason: Human-readable explanation of why the record was rejected.
+    """
+
+    index: int
+    record: Any
+    reason: str
+
+
+class PlainSeedResponse(BaseModel):
+    """Response returned by the ``POST /api/admin/seed`` endpoint.
+
+    Attributes:
+        inserted: Number of records successfully written to the database.
+        items: Full representation of every inserted hardware record.
+        rejected: Records that failed validation and were not inserted.
+    """
+
+    inserted: int
+    items: list[HardwareRead]
+    rejected: list[PlainSeedRejection] = Field(default_factory=list)
 
 
 # ── Rental ─────────────────────────────────────────────────────────────────────

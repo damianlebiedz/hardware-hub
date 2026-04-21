@@ -94,5 +94,8 @@ export const myRentals = (userId) => request('GET', `/rentals/my?user_id=${userI
 /** Send messy legacy JSON to the AI seed importer. */
 export const aiSeed = (rawArray) => request('POST', '/ai/seed', rawArray)
 
+/** Bulk-insert hardware records without AI — invalid records are reported, not inserted. */
+export const plainSeed = (rawArray) => request('POST', '/admin/seed', rawArray)
+
 /** Natural-language hardware search. */
 export const aiSearch = (query) => request('POST', '/ai/search', { query })
