@@ -131,16 +131,96 @@ The SQLite DB is persisted in the named Docker volume (`hardware-hub-sqlite-data
 
 ---
 
-### Useful Development Commands
+### Linting & Formatting
 
-From repository root:
+All commands run from the repository root via Poetry.
+
+#### Black — code formatter
+
+Check only (no changes written — used by CI):
 
 ```bash
 poetry run black --check backend/ tests/
+```
+
+Auto-fix formatting in place:
+
+```bash
+poetry run black backend/ tests/
+```
+
+#### Ruff — linter
+
+Check only:
+
+```bash
 poetry run ruff check backend/ tests/
+```
+
+Auto-fix safe issues in place:
+
+```bash
+poetry run ruff check --fix backend/ tests/
+```
+
+#### Mypy — static type checker
+
+```bash
 poetry run mypy backend/
+```
+
+Mypy is configured in `pyproject.toml` (`[tool.mypy]`). It covers the `backend/` package only; test files are excluded from strict checking to keep fixtures ergonomic.
+
+---
+
+### Running Tests
+
+#### Option A: Local (Poetry)
+
+Run the full test suite with verbose output from the repository root:
+
+```bash
 poetry run pytest tests/ -v
 ```
+
+Run a specific test file:
+
+```bash
+poetry run pytest tests/test_logic.py -v
+```
+
+Run a specific test by name:
+
+```bash
+poetry run pytest tests/ -v -k "test_successful_rent"
+```
+
+The test suite uses an **in-memory SQLite database** (injected via the `DATABASE_URL` environment variable) so no running backend or Docker stack is needed.
+
+> **Note:** Tests that involve AI features (`test_ai_service.py`) mock the Gemini API entirely — no `GEMINI_API_KEY` is required to run the suite.
+
+#### Option B: Inside Docker Compose
+
+If you want to run the test suite against the containerized backend (useful for integration checks), exec into the running backend container:
+
+```bash
+# Start the stack first (if not already running)
+docker compose up -d --build
+
+# Open a shell in the backend container
+docker compose exec backend bash
+
+# Inside the container — run tests against an isolated in-memory DB
+DATABASE_URL=sqlite:///:memory: pytest tests/ -v
+```
+
+Or as a one-liner without an interactive shell:
+
+```bash
+docker compose exec backend bash -c "DATABASE_URL=sqlite:///:memory: pytest tests/ -v"
+```
+
+The `DATABASE_URL=sqlite:///:memory:` override is required inside the container so the tests get a clean, isolated database instead of the production SQLite file mounted at `/app/data/hardware.db`.
 
 ---
 
