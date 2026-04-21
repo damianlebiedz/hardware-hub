@@ -132,6 +132,34 @@ class SearchRequest(BaseModel):
 # ── AI Seed ────────────────────────────────────────────────────────────────────
 
 
+class SeedFieldChange(BaseModel):
+    """Describes a single field corrected by the AI during seed sanitization.
+
+    Attributes:
+        field: Name of the field that was changed.
+        before: Raw value before AI correction (as a string, or None).
+        after: Cleaned value after AI correction (as a string, or None).
+    """
+
+    field: str
+    before: str | None
+    after: str | None
+
+
+class SeedRecordChange(BaseModel):
+    """Per-record correction summary produced by the AI seed pipeline.
+
+    Attributes:
+        index: Zero-based position of the record in the original raw payload.
+        name: Final (cleaned) device name, used as a human-readable label.
+        changes: List of individual field corrections applied to this record.
+    """
+
+    index: int
+    name: str
+    changes: list[SeedFieldChange]
+
+
 class SeedResponse(BaseModel):
     """Response returned by the ``POST /api/ai/seed`` endpoint.
 
@@ -140,10 +168,13 @@ class SeedResponse(BaseModel):
     Attributes:
         inserted: Number of hardware rows successfully written to the database.
         items: Full representation of every inserted hardware record.
+        changes: Per-record corrections made by the AI; only records that had
+            at least one field modified are included.
     """
 
     inserted: int
     items: list[HardwareRead]
+    changes: list[SeedRecordChange] = Field(default_factory=list)
 
 
 # ── Rental ─────────────────────────────────────────────────────────────────────

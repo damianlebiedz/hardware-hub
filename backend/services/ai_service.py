@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass, field as dc_field
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -33,7 +34,7 @@ from google import genai
 from google.genai import types as genai_types
 from pydantic import ValidationError
 
-from backend.schemas import HardwareCreate
+from backend.schemas import HardwareCreate, SeedFieldChange, SeedRecordChange
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -108,11 +109,75 @@ def _strip_markdown_fences(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Diff helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SanitizeResult:
+    """Return value of :func:`sanitize_with_gemini`.
+
+    Attributes:
+        records: Validated :class:`~backend.schemas.HardwareCreate` instances
+            ready for bulk insertion.
+        changes: Per-record corrections made by the AI; only records with at
+            least one modified field are included.
+    """
+
+    records: list[HardwareCreate]
+    changes: list[SeedRecordChange] = dc_field(default_factory=list)
+
+
+def _compute_record_diff(
+    raw_idx: int,
+    raw: dict[str, Any],
+    cleaned: HardwareCreate,
+) -> SeedRecordChange | None:
+    """Compare a raw record to its AI-cleaned counterpart field by field.
+
+    Only fields tracked by :class:`~backend.schemas.HardwareCreate` are
+    compared.  The raw payload may use camelCase (``purchaseDate``) or
+    snake_case (``purchase_date``); both are handled.
+
+    Returns:
+        A :class:`~backend.schemas.SeedRecordChange` when at least one field
+        differs, otherwise ``None``.
+    """
+    field_changes: list[SeedFieldChange] = []
+
+    def _str(val: Any) -> str | None:
+        return str(val) if val is not None and str(val) != "" else None
+
+    comparisons: list[tuple[str, Any, Any]] = [
+        ("name", raw.get("name"), cleaned.name),
+        ("brand", raw.get("brand"), cleaned.brand),
+        (
+            "purchase_date",
+            raw.get("purchaseDate") or raw.get("purchase_date"),
+            str(cleaned.purchase_date) if cleaned.purchase_date else None,
+        ),
+        ("status", raw.get("status"), cleaned.status),
+        ("notes", raw.get("notes"), cleaned.notes),
+    ]
+
+    for field_name, raw_val, clean_val in comparisons:
+        before = _str(raw_val)
+        after = _str(clean_val)
+        if before != after:
+            field_changes.append(SeedFieldChange(field=field_name, before=before, after=after))
+
+    if not field_changes:
+        return None
+
+    return SeedRecordChange(index=raw_idx, name=cleaned.name, changes=field_changes)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCreate]:
+def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
     """Send messy legacy hardware records to Gemini for cleaning and validation.
 
     This function is the core of the AI seed importer pipeline.  It combines
@@ -128,10 +193,11 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
             duplicate IDs — Gemini is instructed to correct all of these.
 
     Returns:
-        A list of validated :class:`~backend.schemas.HardwareCreate` instances
-        ready for bulk insertion.  Records that fail Pydantic validation even
-        after LLM cleaning are skipped (with a warning logged) so that a
-        partially corrupt payload does not block a full import.
+        A :class:`SanitizeResult` with ``records`` (validated
+        :class:`~backend.schemas.HardwareCreate` instances ready for bulk
+        insertion) and ``changes`` (per-record diff of what the AI corrected).
+        Records that fail Pydantic validation even after LLM cleaning are
+        skipped (with a warning logged).
 
     Raises:
         HTTPException (503): If ``GEMINI_API_KEY`` is not set in the
@@ -143,10 +209,10 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
 
     Example:
         >>> records = [{"name": "MacBook Pro", "brand": "Appel", "status": "broken"}]
-        >>> cleaned = sanitize_with_gemini(records)
-        >>> cleaned[0].brand
+        >>> result = sanitize_with_gemini(records)
+        >>> result.records[0].brand
         'Apple'
-        >>> cleaned[0].status
+        >>> result.records[0].status
         'Repair'
     """
     api_key: str | None = os.getenv("GEMINI_API_KEY")
@@ -200,8 +266,9 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
             detail=f"Gemini returned non-JSON output: {exc}",
         ) from exc
 
-    # ── 5. Pydantic validation ──────────────────────────────────────────────
+    # ── 5. Pydantic validation + diff computation ───────────────────────────
     validated: list[HardwareCreate] = []
+    changes: list[SeedRecordChange] = []
     skipped: int = 0
 
     for idx, record in enumerate(cleaned_records):
@@ -213,7 +280,14 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
                 raise TypeError(f"Expected a dict, got {type(record).__name__}")
             # Drop auto-assigned IDs returned by Gemini — the DB will assign them.
             record.pop("id", None)
-            validated.append(HardwareCreate.model_validate(record))
+            hw = HardwareCreate.model_validate(record)
+            validated.append(hw)
+
+            # Compute diff against the original raw record at the same position.
+            raw = raw_records[idx] if idx < len(raw_records) else {}
+            diff = _compute_record_diff(idx, raw, hw)
+            if diff is not None:
+                changes.append(diff)
         except (TypeError, AttributeError, ValidationError) as exc:
             skipped += 1
             logger.warning("Record at index %d is invalid and was skipped: %s", idx, exc)
@@ -231,7 +305,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
         logger.warning("%d record(s) were skipped due to validation errors.", skipped)
 
     logger.info("%d record(s) passed validation and will be inserted.", len(validated))
-    return validated
+    return SanitizeResult(records=validated, changes=changes)
 
 
 # ---------------------------------------------------------------------------

@@ -326,6 +326,16 @@ I also corrected the login error behavior: a first draft differentiated "email n
 
 **Seed import UX bug (frontend hardcoding):** An AI-generated frontend draft hardcoded the entire "legacy seed" JSON directly inside `AdminView.vue` and sent that embedded constant to `/api/ai/seed`. That was a design error: users could not upload their own seed file, and the shipped frontend bundle effectively became the source of truth for migration input. This was corrected by removing the hardcoded dataset and adding a JSON file picker (`.json` / `application/json`) in the Admin panel. The selected file is parsed client-side, validated to be a JSON array, previewed, and only then sent to the backend when the admin clicks the import button.
 
+**AI seed importer as a black box (lack of auditability):** The original AI seed pipeline had a fundamental auditability gap that was not caught during initial design. The importer correctly cleaned the data — fixing typos, normalizing dates, resolving duplicate IDs — but the changes made by the AI were completely invisible to the operator. The admin had no way to know *what* was actually corrected: whether a brand name was silently changed from `"Appel"` to `"Apple"`, whether a date was reformatted, or whether a status was inferred from the notes field. Trusting an AI to mutate company asset records without any audit trail is not an acceptable production behaviour, regardless of how accurate the AI tends to be.
+
+This was identified as a limitation after the initial implementation was complete. The fix spans the full stack:
+- **Backend (`schemas.py`):** Added `SeedFieldChange` and `SeedRecordChange` models to represent per-record, per-field corrections.
+- **Backend (`ai_service.py`):** `sanitize_with_gemini` now computes a field-level diff between each raw input record and the corresponding cleaned output, collecting every changed field (name, brand, status, purchase date, notes) into a structured `SanitizeResult`.
+- **Backend (`routers/ai.py`):** The `POST /api/ai/seed` response now includes a `changes` array alongside the inserted records.
+- **Frontend (`AdminView.vue`):** After a successful import, the Admin panel renders an "AI corrected N records" diff panel. Each modified record shows a collapsible list of field-level before/after changes (e.g. `Brand: "Appel" → "Apple"`), with auto-expand so corrections are immediately visible.
+
+The result is a fully auditable import: the admin can verify every decision the AI made before navigating away.
+
 ### The Prompt Trail
 
 <details>

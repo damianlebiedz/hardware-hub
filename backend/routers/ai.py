@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import Hardware
 from backend.schemas import HardwareCreate, HardwareRead, SearchRequest, SeedResponse
-from backend.services.ai_service import sanitize_with_gemini, text_to_sql
+from backend.services.ai_service import SanitizeResult, sanitize_with_gemini, text_to_sql
 
 router: APIRouter = APIRouter(prefix="/api/ai", tags=["AI"])
 
@@ -99,11 +99,11 @@ def seed_hardware(
         HTTPException (500): If the database transaction fails.
     """
     # ── Step 3: AI sanitization + Pydantic validation ───────────────────────
-    validated_records: list[HardwareCreate] = sanitize_with_gemini(raw_payload)
+    sanitize_result: SanitizeResult = sanitize_with_gemini(raw_payload)
 
     # ── Step 4: Bulk insert ─────────────────────────────────────────────────
     inserted_items: list[Hardware] = []
-    for record in validated_records:
+    for record in sanitize_result.records:
         hw: Hardware = Hardware(**record.model_dump())
         db.add(hw)
         inserted_items.append(hw)
@@ -117,6 +117,7 @@ def seed_hardware(
     return SeedResponse(
         inserted=len(inserted_items),
         items=[HardwareRead.model_validate(hw) for hw in inserted_items],
+        changes=sanitize_result.changes,
     )
 
 

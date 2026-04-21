@@ -61,15 +61,14 @@
           />
         </div>
 
-        <div v-if="seedRecordCount > 0" class="alert alert-info" style="margin-bottom:1rem;">
+        <div v-if="seedRecordCount > 0 && !seedChanges.length" class="alert alert-info" style="margin-bottom:1rem;">
           <strong>{{ seedRecordCount }} records</strong> from
           <strong>{{ seedFileName }}</strong> are ready to be sent to Gemini
           for cleaning (typo correction, date normalization, status mapping,
           duplicate ID resolution) then inserted into the hardware table.
         </div>
 
-        <div v-if="seedError"   class="alert alert-error">{{ seedError }}</div>
-        <div v-if="seedSuccess" class="alert alert-success">{{ seedSuccess }}</div>
+        <div v-if="seedError" class="alert alert-error">{{ seedError }}</div>
 
         <button class="btn btn-primary" :disabled="seedLoading || seedRecordCount === 0" @click="handleSeedImport">
           <span v-if="seedLoading" class="spinner"></span>
@@ -77,7 +76,7 @@
         </button>
 
         <!-- Preview of raw data that will be sent -->
-        <details v-if="seedRecordCount > 0" style="margin-top:1rem;">
+        <details v-if="seedRecordCount > 0 && !seedChanges.length" style="margin-top:1rem;">
           <summary class="text-muted" style="cursor:pointer; font-size:.8rem;">
             Show raw data preview
           </summary>
@@ -85,15 +84,60 @@
                       background:var(--bg); padding:.75rem; border-radius:var(--radius);
                       border:1px solid var(--border);">{{ JSON.stringify(seedPayload, null, 2) }}</pre>
         </details>
+
+        <!-- ── AI corrections diff panel ──────────────────────────────── -->
+        <div v-if="seedChanges.length" class="diff-panel">
+          <div class="diff-panel-title">
+            ✏️ AI corrected {{ seedChanges.length }} record{{ seedChanges.length > 1 ? 's' : '' }}
+          </div>
+
+          <div v-for="rec in seedChanges" :key="rec.index" class="diff-record">
+            <div class="diff-record-header" @click="toggleDiff(rec.index)">
+              <span class="diff-record-name">{{ rec.name }}</span>
+              <span class="diff-badge">
+                ⚠ {{ rec.changes.length }} fix{{ rec.changes.length > 1 ? 'es' : '' }}
+              </span>
+              <span class="diff-chevron" :class="{ open: expandedDiffs.has(rec.index) }">▼</span>
+            </div>
+
+            <div v-if="expandedDiffs.has(rec.index)" class="diff-rows">
+              <div v-for="ch in rec.changes" :key="ch.field" class="diff-row">
+                <span class="diff-field">{{ fieldLabel(ch.field) }}</span>
+                <span class="diff-before">{{ ch.before ?? '—' }}</span>
+                <span class="diff-arrow">→</span>
+                <span class="diff-after">{{ ch.after ?? '—' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
     </div>
   </div>
+
+  <!-- ── Toast notification ─────────────────────────────────────────────── -->
+  <Transition name="toast">
+    <div v-if="showToast" class="toast" role="alert">
+      <div class="toast-header">
+        <span class="toast-title">✓ Import successful</span>
+        <button class="toast-close" @click="dismissToast" aria-label="Close">×</button>
+      </div>
+      <div class="toast-body">{{ toastMessage }}</div>
+      <div class="toast-actions">
+        <button class="btn btn-primary btn-sm" @click="goToDashboard">View in Dashboard →</button>
+        <button class="btn btn-ghost btn-sm" @click="dismissToast">Dismiss</button>
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import { createUser, aiSeed } from '../api/client.js'
+
+const router = useRouter()
 
 // ── Add user state ──────────────────────────────────────────────────────────
 const newEmail    = ref('')
@@ -120,18 +164,65 @@ async function handleCreateUser() {
 }
 
 // ── AI Seed Import state ────────────────────────────────────────────────────
-const seedLoading = ref(false)
-const seedError   = ref('')
-const seedSuccess = ref('')
-const seedPayload = ref([])
-const seedFileName = ref('')
+const seedLoading     = ref(false)
+const seedError       = ref('')
+const seedPayload     = ref([])
+const seedFileName    = ref('')
 const seedRecordCount = ref(0)
+const seedChanges     = ref([])  // SeedRecordChange[] from backend
 
+// Diff expand/collapse state
+const expandedDiffs = reactive(new Set())
+
+function toggleDiff(index) {
+  if (expandedDiffs.has(index)) {
+    expandedDiffs.delete(index)
+  } else {
+    expandedDiffs.add(index)
+  }
+}
+
+const FIELD_LABELS = {
+  name:          'Name',
+  brand:         'Brand',
+  purchase_date: 'Date',
+  status:        'Status',
+  notes:         'Notes',
+}
+function fieldLabel(field) {
+  return FIELD_LABELS[field] ?? field
+}
+
+// ── Toast state ─────────────────────────────────────────────────────────────
+const showToast    = ref(false)
+const toastMessage = ref('')
+let toastTimer     = null
+
+function showImportToast(message) {
+  toastMessage.value = message
+  showToast.value = true
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(dismissToast, 7000)
+}
+
+function dismissToast() {
+  showToast.value = false
+  clearTimeout(toastTimer)
+}
+
+function goToDashboard() {
+  dismissToast()
+  router.push('/dashboard')
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
 async function handleSeedFileChange(event) {
-  seedError.value = seedSuccess.value = ''
+  seedError.value = ''
   seedPayload.value = []
   seedRecordCount.value = 0
   seedFileName.value = ''
+  seedChanges.value = []
+  expandedDiffs.clear()
 
   const file = event.target.files?.[0]
   if (!file) return
@@ -151,7 +242,10 @@ async function handleSeedFileChange(event) {
 }
 
 async function handleSeedImport() {
-  seedError.value = seedSuccess.value = ''
+  seedError.value = ''
+  seedChanges.value = []
+  expandedDiffs.clear()
+
   if (seedRecordCount.value === 0) {
     seedError.value = 'Upload a JSON file with at least one record first.'
     return
@@ -159,7 +253,16 @@ async function handleSeedImport() {
   seedLoading.value = true
   try {
     const result = await aiSeed(seedPayload.value)
-    seedSuccess.value = `✓ Inserted ${result.inserted} record(s) after AI sanitization.`
+    seedChanges.value = result.changes ?? []
+
+    // Auto-expand all changed records so the user sees them immediately
+    seedChanges.value.forEach(rec => expandedDiffs.add(rec.index))
+
+    const correctedCount = seedChanges.value.length
+    const msg = correctedCount > 0
+      ? `Inserted ${result.inserted} record(s). AI corrected ${correctedCount} of them — see the panel below.`
+      : `Inserted ${result.inserted} record(s). All records were already clean.`
+    showImportToast(msg)
   } catch (err) {
     seedError.value = err.message || 'AI seed import failed.'
   } finally {

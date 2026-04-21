@@ -79,7 +79,7 @@ class TestNonDictItemsAreSkipped:
         """Shared runner: mock env + Gemini, call sanitize_with_gemini."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
         with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
-            return sanitize_with_gemini([{}])  # raw input ignored — Gemini is mocked
+            return sanitize_with_gemini([{}]).records  # raw input ignored — Gemini is mocked
 
     def test_integer_items_are_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An integer inside the Gemini array must be skipped, not raise AttributeError.
@@ -144,7 +144,7 @@ class TestNormalValidationBehaviour:
     def _run(self, monkeypatch: pytest.MonkeyPatch, payload: list) -> list:
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
         with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
-            return sanitize_with_gemini([{}])
+            return sanitize_with_gemini([{}]).records
 
     def test_valid_records_pass_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """All valid dicts are returned as HardwareCreate instances."""
@@ -180,3 +180,35 @@ class TestNormalValidationBehaviour:
 
         assert len(result) == 1
         assert result[0].name == _VALID_RECORD["name"]
+
+    def test_sanitize_result_has_changes_for_corrected_records(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SanitizeResult.changes must include entries when the AI corrects fields."""
+        raw_input = [{"name": "MacBook Pro", "brand": "Appel", "status": "Available"}]
+        cleaned_output = [{"name": "MacBook Pro", "brand": "Apple", "status": "Available"}]
+
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        with patch("backend.services.ai_service.genai.Client", _mock_gemini(cleaned_output)):
+            result = sanitize_with_gemini(raw_input)
+
+        assert len(result.records) == 1
+        assert len(result.changes) == 1
+        change = result.changes[0]
+        assert change.name == "MacBook Pro"
+        field_names = [c.field for c in change.changes]
+        assert "brand" in field_names
+        brand_change = next(c for c in change.changes if c.field == "brand")
+        assert brand_change.before == "Appel"
+        assert brand_change.after == "Apple"
+
+    def test_sanitize_result_no_changes_when_all_clean(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SanitizeResult.changes must be empty when the AI makes no corrections."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        with patch("backend.services.ai_service.genai.Client", _mock_gemini([_VALID_RECORD])):
+            result = sanitize_with_gemini([_VALID_RECORD])
+
+        assert len(result.records) == 1
+        assert result.changes == []
