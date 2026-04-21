@@ -57,7 +57,7 @@ export GEMINI_API_KEY="your_api_key_here"
 ```
 
 Optional:
-- `GEMINI_MODEL` (default: `gemini-1.5-flash`)
+- `GEMINI_MODEL` (default: `gemini-2.5-flash`)
 - `DATABASE_URL` (default: `sqlite:////app/data/hardware.db`)
 
 **Bootstrap admin** (see [Admin Bootstrap](#admin-bootstrap) below):
