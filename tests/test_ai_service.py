@@ -78,9 +78,7 @@ class TestNonDictItemsAreSkipped:
     def _run(self, monkeypatch: pytest.MonkeyPatch, payload: list) -> list:
         """Shared runner: mock env + Gemini, call sanitize_with_gemini."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
-        with patch(
-            "backend.services.ai_service.genai.Client", _mock_gemini(payload)
-        ):
+        with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
             return sanitize_with_gemini([{}])  # raw input ignored — Gemini is mocked
 
     def test_integer_items_are_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,24 +117,20 @@ class TestNonDictItemsAreSkipped:
         assert len(result) == 1
         assert result[0].name == _VALID_RECORD["name"]
 
-    def test_mixed_primitives_all_skipped_raises_422(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_mixed_primitives_all_skipped_raises_422(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When EVERY item is a non-dict primitive the endpoint must raise HTTP 422,
         NOT an unhandled AttributeError (which would surface as 500).
         """
         payload = [1, "bad", None, []]
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
 
-        with patch(
-            "backend.services.ai_service.genai.Client", _mock_gemini(payload)
-        ):
+        with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
             with pytest.raises(HTTPException) as exc_info:
                 sanitize_with_gemini([{}])
 
-        assert exc_info.value.status_code == 422, (
-            "All-bad payload must raise 422 Unprocessable, not 500 AttributeError."
-        )
+        assert (
+            exc_info.value.status_code == 422
+        ), "All-bad payload must raise 422 Unprocessable, not 500 AttributeError."
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +143,7 @@ class TestNormalValidationBehaviour:
 
     def _run(self, monkeypatch: pytest.MonkeyPatch, payload: list) -> list:
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
-        with patch(
-            "backend.services.ai_service.genai.Client", _mock_gemini(payload)
-        ):
+        with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
             return sanitize_with_gemini([{}])
 
     def test_valid_records_pass_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,9 +155,7 @@ class TestNormalValidationBehaviour:
         assert result[0].name == _VALID_RECORD["name"]
         assert result[1].status == "Repair"
 
-    def test_id_field_is_stripped_from_valid_records(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_id_field_is_stripped_from_valid_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The ``id`` key returned by Gemini must be removed before Pydantic validation.
 
         HardwareCreate has no ``id`` field — if it were forwarded, model_validate
@@ -185,7 +175,7 @@ class TestNormalValidationBehaviour:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A dict that fails Pydantic validation is skipped; valid ones still pass."""
-        bad_schema = {"name": "", "status": "Available"}   # name min_length=1 → fail
+        bad_schema = {"name": "", "status": "Available"}  # name min_length=1 → fail
         result = self._run(monkeypatch, [bad_schema, _VALID_RECORD])
 
         assert len(result) == 1

@@ -60,7 +60,9 @@ def bootstrap_admin(db: Session) -> None:
     """
     enabled_raw: str = os.getenv("BOOTSTRAP_ADMIN_ENABLED", "true")
     if enabled_raw.strip().lower() != "true":
-        logger.info("[bootstrap] Admin bootstrap is disabled (BOOTSTRAP_ADMIN_ENABLED=%s).", enabled_raw)
+        logger.info(
+            "[bootstrap] Admin bootstrap is disabled (BOOTSTRAP_ADMIN_ENABLED=%s).", enabled_raw
+        )
         return
 
     email: str | None = os.getenv("BOOTSTRAP_ADMIN_EMAIL")
@@ -77,9 +79,7 @@ def bootstrap_admin(db: Session) -> None:
             "Set the variable or disable bootstrap with BOOTSTRAP_ADMIN_ENABLED=false."
         )
     if len(password) < 8:
-        raise RuntimeError(
-            "[bootstrap] BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters."
-        )
+        raise RuntimeError("[bootstrap] BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters.")
 
     existing: User | None = db.query(User).filter(User.email == email).first()
 

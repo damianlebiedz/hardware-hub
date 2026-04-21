@@ -19,7 +19,7 @@ Environment variables
     Required.  Google AI API key.
     Obtain from https://aistudio.google.com/app/apikey.
 ``GEMINI_MODEL``
-    Optional.  Gemini model identifier.  Defaults to ``gemini-1.5-flash``.
+    Optional.  Gemini model identifier.  Defaults to ``gemini-2.5-flash``.
 """
 
 import json
@@ -159,7 +159,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
             ),
         )
 
-    model_name: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model_name: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
     raw_json: str = json.dumps(raw_records, indent=2, default=str)
@@ -380,7 +380,7 @@ def text_to_sql(natural_language_query: str) -> str:
             ),
         )
 
-    model_name: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model_name: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
     full_prompt: str = f"{_SEARCH_SYSTEM_PROMPT}\n\n" f"User query: {natural_language_query}"
