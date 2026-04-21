@@ -324,6 +324,59 @@ I also corrected the login error behavior: a first draft differentiated "email n
 
 **Bootstrap task (admin bootstrap):** During implementation of the admin bootstrap routine, the first draft read `BOOTSTRAP_ADMIN_PASSWORD` from the environment and wrote a confirmation log line of the form `"Bootstrap password set to: <value>"` to make the startup output easy to read during development. That approach would have exposed the plaintext admin credential in container logs — a critical security issue in any environment where stdout is collected (Docker, cloud log aggregators, CI). The issue was caught before commit by reviewing what the log line would contain. The fix was straightforward: log only the email address and the action taken (created / promoted / already exists), and never reference the password value at any point after it has been passed to `hash_password()`.
 
+<details>
+<summary><b>Bootstrap task Prompt</b></summary>
+
+```text
+Task: Implement automatic bootstrap of the first admin user at application startup.
+
+## Context
+
+Currently, a fresh database has no admin user. The `/api/admin/users` endpoint itself requires admin role, so initial setup is blocked.
+
+## Requirements
+
+1. Add environment variables:
+    - `BOOTSTRAP_ADMIN_ENABLED` (default: "true")
+    - `BOOTSTRAP_ADMIN_EMAIL` (required if enabled)
+    - `BOOTSTRAP_ADMIN_PASSWORD` (required if enabled)
+2. On FastAPI startup (after DB initialization), run a bootstrap routine:
+    - If `BOOTSTRAP_ADMIN_ENABLED` is false -> do nothing.
+    - If enabled and user with `BOOTSTRAP_ADMIN_EMAIL` does not exist -> create user with role `"admin"` and hashed password.
+    - If user exists but role is not `"admin"` -> promote role to `"admin"` (do not overwrite password).
+    - If user exists and is already admin -> no-op.
+3. Behavior must be idempotent and safe across repeated restarts.
+4. Validation:
+    - If enabled but email/password missing, fail startup with a clear error message.
+5. Logging:
+    - Add clear startup logs for each path: disabled / created / promoted / already exists / invalid config.
+6. Architecture:
+    - Keep startup handler clean; place bootstrap logic in a dedicated helper/service function.
+7. Security:
+    - Never store plaintext password.
+    - Use the same password hashing utility used by auth/user creation.
+8. DB compatibility:
+    - Ensure this works with existing SQLite DBs that may not yet have password column (use project's migration strategy).
+9. Docs:
+    - Update README with bootstrap admin env vars and startup behavior.
+    - Update/create `.env.example` with placeholders.
+10. Reflection note (mandatory):
+- In @README.md, in section ‘**AI Development Log’** include a subsection titled exactly:
+`The "Correction"`
+- In that section, describe at least one specific moment where the AI proposed a suboptimal, buggy, or insecure approach during this task.
+- Explain how you identified the issue and how you corrected it to match the intended architecture/security.
+
+## Deliverables
+
+- Code changes in backend startup + auth/user domain as needed.
+- Updated docs.
+- A short summary of changed files and exact runtime behavior.
+- Mandatory `The "Correction"` subsection in the final report.
+```
+
+</details>
+
+
 **Seed import UX bug (frontend hardcoding):** An AI-generated frontend draft hardcoded the entire "legacy seed" JSON directly inside `AdminView.vue` and sent that embedded constant to `/api/ai/seed`. That was a design error: users could not upload their own seed file, and the shipped frontend bundle effectively became the source of truth for migration input. This was corrected by removing the hardcoded dataset and adding a JSON file picker (`.json` / `application/json`) in the Admin panel. The selected file is parsed client-side, validated to be a JSON array, previewed, and only then sent to the backend when the admin clicks the import button.
 
 **AI seed importer as a black box (lack of auditability):** The original AI seed pipeline had a fundamental auditability gap that was not caught during initial design. The importer correctly cleaned the data — fixing typos, normalizing dates, resolving duplicate IDs — but the changes made by the AI were completely invisible to the operator. The admin had no way to know *what* was actually corrected: whether a brand name was silently changed from `"Appel"` to `"Apple"`, whether a date was reformatted, or whether a status was inferred from the notes field. Trusting an AI to mutate company asset records without any audit trail is not an acceptable production behaviour, regardless of how accurate the AI tends to be.
@@ -425,9 +478,13 @@ Analyze my technical context and produce two markdown files:
 2. **`INSTRUCTIONS_FOR_AGENTS.md`**: A step-by-step, prompt-ready guide that I will use with an AI coding agent (Cursor) to build the project. Break the implementation down into 5-6 logical, iterative "Steps" (e.g., Step 1: FastAPI Init & Models, Step 2: Vue.js UI & Auth Hack, Step 3: AI Seed Importer, etc.) so I can use them with Cursor sequentially.
 ``````
 
+</details>
+
 <details>
 <summary><b>Phase 1 Agent Prompts (Cursor Agent with Sonnet 4.6)</b></summary>
 
 ```text
 @INSTRUCTIONS_FOR_AGENTS.md @ARCHITECTURE.md Analyze the instructions and strictly execute Step 1/2/.../7.
 ```
+
+</details>
