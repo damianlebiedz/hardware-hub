@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import Hardware
-from backend.schemas import HardwareCreate, HardwareRead, SearchRequest, SeedResponse
+from backend.schemas import HardwareRead, SearchRequest, SeedResponse
 from backend.services.ai_service import SanitizeResult, sanitize_with_gemini, text_to_sql
 
 router: APIRouter = APIRouter(prefix="/api/ai", tags=["AI"])
