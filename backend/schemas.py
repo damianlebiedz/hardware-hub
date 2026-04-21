@@ -113,6 +113,20 @@ class HardwareRead(BaseModel):
     notes: Optional[str]
 
 
+# ── AI Search ──────────────────────────────────────────────────────────────────
+
+
+class SearchRequest(BaseModel):
+    """Payload for the natural-language semantic search endpoint.
+
+    Attributes:
+        query: Free-text question or description, e.g.
+            ``'Show me broken Apple laptops'``.
+    """
+
+    query: str = Field(..., min_length=1)
+
+
 # ── AI Seed ────────────────────────────────────────────────────────────────────
 
 

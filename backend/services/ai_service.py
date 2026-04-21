@@ -1,34 +1,22 @@
-"""AI-assisted data sanitization service for Hardware Hub.
+"""AI-assisted data sanitization and semantic search service for Hardware Hub.
 
-This module encapsulates the Gemini API integration used by the seed importer
-pipeline.  The single public function :func:`sanitize_with_gemini` receives an
-arbitrary list of raw hardware records (potentially malformed legacy data),
-delegates cleaning to the LLM, and returns a validated list of
-:class:`~backend.schemas.HardwareCreate` objects that are safe to bulk-insert
-into the database.
+This module encapsulates all Gemini API integrations:
 
-Pipeline overview
------------------
-1. **Prompt construction** — A strict system prompt is prepended to the raw
-   JSON payload.  The prompt instructs Gemini to act as a data-cleaning agent
-   and return *only* a valid JSON array with no surrounding text or markdown.
-2. **LLM call** — The combined prompt is sent to ``gemini-1.5-flash`` via the
-   ``google-generativeai`` SDK.  The model name can be overridden with the
-   ``GEMINI_MODEL`` environment variable.
-3. **Response stripping** — LLMs occasionally wrap JSON in markdown fences
-   (`` ```json ... ``` ``).  A lightweight stripping function removes any such
-   wrappers before parsing.
-4. **JSON parsing** — The stripped response is parsed with :func:`json.loads`.
-   Any parse error raises an :class:`~fastapi.HTTPException` (502) so the
-   caller receives a meaningful error rather than an unhandled exception.
-5. **Pydantic validation** — Each record is coerced through
-   :class:`~backend.schemas.HardwareCreate`.  Records that fail validation are
-   collected and reported; the valid subset is returned to the caller.
+* :func:`sanitize_with_gemini` — seed importer pipeline that cleans messy
+  legacy hardware records and returns validated
+  :class:`~backend.schemas.HardwareCreate` objects.
+
+* :func:`sanitize_sql` — **critical security gate** that strips markdown
+  fences from an LLM-generated SQL string and verifies it is a read-only
+  ``SELECT`` statement with no destructive keywords.
+
+* :func:`text_to_sql` — semantic search pipeline that translates a natural-
+  language query into a safe SQLite ``SELECT`` statement via Gemini.
 
 Environment variables
 ---------------------
 ``GEMINI_API_KEY``
-    Required.  Google AI API key used to authenticate Gemini requests.
+    Required.  Google AI API key.
     Obtain from https://aistudio.google.com/app/apikey.
 ``GEMINI_MODEL``
     Optional.  Gemini model identifier.  Defaults to ``gemini-1.5-flash``.
@@ -111,9 +99,10 @@ def _strip_markdown_fences(text: str) -> str:
         '[{...}]'
     """
     stripped: str = text.strip()
-    # Match optional language hint (e.g. ```json) followed by content and closing ```
+    # Match optional language hint (e.g. ```json, ```sql, ```python …) followed
+    # by content and a closing ```.
     pattern: re.Pattern[str] = re.compile(
-        r"^```(?:json)?\s*([\s\S]*?)\s*```$", re.IGNORECASE
+        r"^```(?:\w+)?\s*([\s\S]*?)\s*```$", re.IGNORECASE
     )
     match: re.Match[str] | None = pattern.match(stripped)
     if match:
@@ -234,7 +223,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
 
     if not validated:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"All {len(cleaned_records)} records returned by Gemini failed "
                 "schema validation.  No data was inserted."
@@ -246,3 +235,182 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
 
     logger.info("%d record(s) passed validation and will be inserted.", len(validated))
     return validated
+
+
+# ---------------------------------------------------------------------------
+# Semantic search — Text-to-SQL
+# ---------------------------------------------------------------------------
+
+# Exact SQLite DDL for the hardware table, embedded in every search prompt so
+# Gemini has unambiguous column names and types to reason about.
+_HARDWARE_SCHEMA_DDL: str = """
+CREATE TABLE hardware (
+    id            INTEGER  PRIMARY KEY AUTOINCREMENT,
+    name          VARCHAR  NOT NULL,
+    brand         VARCHAR,
+    purchase_date DATETIME,
+    status        VARCHAR  NOT NULL DEFAULT 'Available',
+    notes         TEXT
+);
+""".strip()
+
+_SEARCH_SYSTEM_PROMPT: str = f"""
+You are a SQL translation agent for a SQLite database.
+The database contains a single relevant table with the following schema:
+
+{_HARDWARE_SCHEMA_DDL}
+
+Valid values for the `status` column are: 'Available', 'In Use', 'Repair'.
+
+Your task: translate the user's natural-language query into a single, valid
+SQLite SELECT statement that retrieves data from the `hardware` table.
+
+Rules you MUST follow without exception:
+1. Return ONLY the raw SQL statement — no explanation, no markdown, no code
+   fences, no trailing semicolons.
+2. The statement MUST begin with the word SELECT (case-insensitive).
+3. You MUST NOT produce any statement containing DROP, DELETE, UPDATE, INSERT,
+   PRAGMA, ALTER, CREATE, or any other data-modification keyword.
+4. Use only columns that exist in the schema above.
+5. For status comparisons use the exact casing: 'Available', 'In Use', 'Repair'.
+6. If the query is ambiguous, return a broad SELECT that covers likely intent.
+7. Never use LIMIT unless the user explicitly asks for a limited number of
+   results.
+""".strip()
+
+# Keywords whose presence in the LLM output must trigger an immediate reject.
+_FORBIDDEN_KEYWORDS: frozenset[str] = frozenset(
+    {"DROP", "DELETE", "UPDATE", "INSERT", "PRAGMA", "ALTER", "CREATE"}
+)
+
+
+def sanitize_sql(raw_sql: str) -> str:
+    """Strip markdown formatting from LLM output and enforce read-only SQL.
+
+    This is the **critical security gate** between the LLM response and the
+    database engine.  It applies three successive checks:
+
+    1. **Markdown stripping** — removes `` ```sql ... ``` `` or
+       `` ``` ... ``` `` fences via :func:`_strip_markdown_fences`.
+    2. **SELECT assertion** — the cleaned string must begin with ``SELECT``
+       (checked case-insensitively after normalisation).
+    3. **Forbidden keyword scan** — the upper-cased token set of the query
+       must not intersect with :data:`_FORBIDDEN_KEYWORDS`.  Tokenisation is
+       done on word boundaries so that ``DROPDOWN`` does not trip the
+       ``DROP`` guard.
+
+    Args:
+        raw_sql: Raw text returned by the Gemini API.
+
+    Returns:
+        The sanitized SQL string, stripped of whitespace and safe to execute.
+
+    Raises:
+        HTTPException (422): If the cleaned string does not start with
+            ``SELECT``.
+        HTTPException (422): If any forbidden keyword is found in the
+            query tokens.
+
+    Example:
+        >>> sanitize_sql("```sql\\nSELECT * FROM hardware WHERE status='Repair'\\n```")
+        "SELECT * FROM hardware WHERE status='Repair'"
+
+        >>> sanitize_sql("DROP TABLE hardware")
+        # raises HTTPException(422)
+    """
+    cleaned: str = _strip_markdown_fences(raw_sql).rstrip(";").strip()
+
+    if not cleaned.upper().startswith("SELECT"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "The AI did not return a SELECT statement. "
+                f"Received: {cleaned[:200]!r}"
+            ),
+        )
+
+    # Tokenise on word boundaries for accurate keyword detection.
+    tokens: set[str] = set(re.findall(r"\b[A-Za-z_]+\b", cleaned.upper()))
+    found_forbidden: set[str] = tokens & _FORBIDDEN_KEYWORDS
+    if found_forbidden:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Generated SQL contains forbidden keyword(s): "
+                f"{sorted(found_forbidden)}.  Query rejected for safety."
+            ),
+        )
+
+    return cleaned
+
+
+def text_to_sql(natural_language_query: str) -> str:
+    """Translate a natural-language hardware query into a safe SQLite SELECT.
+
+    Pipeline:
+
+    1. **Prompt construction** — The hardware table DDL and a strict
+       instruction set are combined with the user's query and sent to Gemini.
+    2. **LLM call** — Gemini returns what should be a raw SQL ``SELECT``
+       statement.
+    3. **Security sanitization** — :func:`sanitize_sql` strips any markdown
+       fences and rejects any output that is not a read-only ``SELECT`` or
+       that contains a forbidden keyword.
+
+    Args:
+        natural_language_query: Free-text query from the end user, e.g.
+            ``'Show me broken Apple laptops'``.
+
+    Returns:
+        A sanitized SQLite ``SELECT`` string ready to be executed against the
+        ``hardware`` table.
+
+    Raises:
+        HTTPException (503): If ``GEMINI_API_KEY`` is not set.
+        HTTPException (502): If the Gemini API call fails.
+        HTTPException (422): If the LLM output fails the security gate (not a
+            SELECT, or contains a forbidden keyword).
+
+    Example:
+        >>> sql = text_to_sql("Find all Apple items under repair")
+        >>> sql.upper().startswith("SELECT")
+        True
+    """
+    api_key: str | None = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "GEMINI_API_KEY environment variable is not set. "
+                "The AI search feature is unavailable."
+            ),
+        )
+
+    model_name: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+    # ── 1. Build the full prompt ────────────────────────────────────────────
+    full_prompt: str = (
+        f"{_SEARCH_SYSTEM_PROMPT}\n\n"
+        f"User query: {natural_language_query}"
+    )
+
+    # ── 2. Call the Gemini API ──────────────────────────────────────────────
+    try:
+        client: genai.Client = genai.Client(api_key=api_key)
+        logger.info("Translating query to SQL via Gemini (%s): %r", model_name, natural_language_query)
+        response: genai_types.GenerateContentResponse = client.models.generate_content(
+            model=model_name,
+            contents=full_prompt,
+        )
+        raw_sql: str = response.text
+    except Exception as exc:
+        logger.exception("Gemini API call failed during text-to-SQL: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Gemini API call failed: {exc}",
+        ) from exc
+
+    # ── 3. Sanitize and return ──────────────────────────────────────────────
+    safe_sql: str = sanitize_sql(raw_sql)
+    logger.info("Generated safe SQL: %s", safe_sql)
+    return safe_sql
