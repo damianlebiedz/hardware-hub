@@ -15,7 +15,6 @@ from fastapi import HTTPException
 
 from backend.services.ai_service import sanitize_sql
 
-
 # ---------------------------------------------------------------------------
 # Happy paths
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ Admin-only enforcement is lightweight for the MVP: endpoints accept an
 A proper RBAC layer backed by JWT claims should replace this in production.
 """
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -21,13 +21,10 @@ from backend.database import get_db
 from backend.models import Hardware
 from backend.schemas import HardwareCreate, HardwareRead, HardwareUpdate
 
-
 router: APIRouter = APIRouter(prefix="/api/hardware", tags=["Hardware"])
 
 _VALID_STATUSES: frozenset[str] = frozenset({"Available", "In Use", "Repair"})
-_SORTABLE_FIELDS: frozenset[str] = frozenset(
-    {"id", "name", "brand", "purchase_date", "status"}
-)
+_SORTABLE_FIELDS: frozenset[str] = frozenset({"id", "name", "brand", "purchase_date", "status"})
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +32,7 @@ _SORTABLE_FIELDS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def _require_admin(x_user_role: Optional[str]) -> None:
+def _require_admin(x_user_role: str | None) -> None:
     """Raise HTTP 403 if the caller is not an admin.
 
     Args:
@@ -58,24 +55,28 @@ def _require_admin(x_user_role: Optional[str]) -> None:
 
 @router.get(
     "",
-    response_model=List[HardwareRead],
+    response_model=list[HardwareRead],
     summary="List hardware items",
 )
 def list_hardware(
     db: Session = Depends(get_db),
-    filter_status: Optional[Literal["Available", "In Use", "Repair"]] = Query(
+    filter_status: Literal["Available", "In Use", "Repair"] | None = Query(
         default=None,
         alias="status",
         description="Filter by hardware status.",
     ),
-    brand: Optional[str] = Query(default=None, description="Filter by brand name (case-insensitive, partial match)."),
-    name: Optional[str] = Query(default=None, description="Filter by device name (case-insensitive, partial match)."),
+    brand: str | None = Query(
+        default=None, description="Filter by brand name (case-insensitive, partial match)."
+    ),
+    name: str | None = Query(
+        default=None, description="Filter by device name (case-insensitive, partial match)."
+    ),
     sort_by: str = Query(
         default="id",
         description="Column to sort by. Allowed: id, name, brand, purchase_date, status.",
     ),
     order: Literal["asc", "desc"] = Query(default="asc", description="Sort direction."),
-) -> List[Hardware]:
+) -> list[Hardware]:
     """Return a filtered and sorted list of hardware items.
 
     All filter parameters are optional and combinable.
@@ -124,7 +125,7 @@ def list_hardware(
 def create_hardware(
     payload: HardwareCreate,
     db: Session = Depends(get_db),
-    x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
 ) -> Hardware:
     """Create and persist a new hardware record.
 
@@ -158,7 +159,7 @@ def update_hardware(
     hardware_id: int,
     payload: HardwareUpdate,
     db: Session = Depends(get_db),
-    x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
 ) -> Hardware:
     """Partially update a hardware item's fields.
 
@@ -182,7 +183,7 @@ def update_hardware(
     """
     _require_admin(x_user_role)
 
-    hw: Optional[Hardware] = db.get(Hardware, hardware_id)
+    hw: Hardware | None = db.get(Hardware, hardware_id)
     if hw is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

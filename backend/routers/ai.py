@@ -14,7 +14,7 @@ Detailed documentation for the service layer lives in
 :mod:`backend.services.ai_service`.
 """
 
-from typing import Any, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
@@ -24,7 +24,6 @@ from backend.database import get_db
 from backend.models import Hardware
 from backend.schemas import HardwareCreate, HardwareRead, SearchRequest, SeedResponse
 from backend.services.ai_service import sanitize_with_gemini, text_to_sql
-
 
 router: APIRouter = APIRouter(prefix="/api/ai", tags=["AI"])
 
@@ -42,7 +41,7 @@ router: APIRouter = APIRouter(prefix="/api/ai", tags=["AI"])
     },
 )
 def seed_hardware(
-    raw_payload: List[Any],
+    raw_payload: list[Any],
     db: Session = Depends(get_db),
 ) -> SeedResponse:
     """Accept raw legacy hardware data, sanitize it with Gemini, and persist it.
@@ -100,10 +99,10 @@ def seed_hardware(
         HTTPException (500): If the database transaction fails.
     """
     # ── Step 3: AI sanitization + Pydantic validation ───────────────────────
-    validated_records: List[HardwareCreate] = sanitize_with_gemini(raw_payload)
+    validated_records: list[HardwareCreate] = sanitize_with_gemini(raw_payload)
 
     # ── Step 4: Bulk insert ─────────────────────────────────────────────────
-    inserted_items: List[Hardware] = []
+    inserted_items: list[Hardware] = []
     for record in validated_records:
         hw: Hardware = Hardware(**record.model_dump())
         db.add(hw)
@@ -123,7 +122,7 @@ def seed_hardware(
 
 @router.post(
     "/search",
-    response_model=List[HardwareRead],
+    response_model=list[HardwareRead],
     summary="Natural-language semantic search (Text-to-SQL)",
     responses={
         200: {"description": "Query executed; matching hardware rows returned."},
@@ -135,7 +134,7 @@ def seed_hardware(
 def search_hardware(
     payload: SearchRequest,
     db: Session = Depends(get_db),
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Translate a natural-language query to SQL and return matching hardware rows.
 
     **Full pipeline flow:**
@@ -198,6 +197,6 @@ def search_hardware(
         ) from exc
 
     # ── Step 5: Map rows to JSON-serialisable dicts ──────────────────────────
-    columns: List[str] = list(result.keys())
-    rows: List[dict[str, Any]] = [dict(zip(columns, row)) for row in result.fetchall()]
+    columns: list[str] = list(result.keys())
+    rows: list[dict[str, Any]] = [dict(zip(columns, row, strict=True)) for row in result.fetchall()]
     return rows

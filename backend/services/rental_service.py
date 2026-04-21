@@ -21,13 +21,11 @@ Raises:
 """
 
 import datetime
-from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.models import Hardware, Rental, User
-
 
 # ---------------------------------------------------------------------------
 # Rent
@@ -62,14 +60,14 @@ def rent_hardware(db: Session, user_id: int, hardware_id: int) -> Rental:
         >>> rental.hardware.status
         'In Use'
     """
-    user: Optional[User] = db.get(User, user_id)
+    user: User | None = db.get(User, user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with id={user_id} not found.",
         )
 
-    hardware: Optional[Hardware] = db.get(Hardware, hardware_id)
+    hardware: Hardware | None = db.get(Hardware, hardware_id)
     if hardware is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -132,7 +130,7 @@ def return_hardware(db: Session, rental_id: int) -> Rental:
         >>> closed.hardware.status
         'Available'
     """
-    rental: Optional[Rental] = db.get(Rental, rental_id)
+    rental: Rental | None = db.get(Rental, rental_id)
     if rental is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

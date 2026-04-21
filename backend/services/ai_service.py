@@ -35,7 +35,6 @@ from pydantic import ValidationError
 
 from backend.schemas import HardwareCreate
 
-
 logger: logging.Logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -101,9 +100,7 @@ def _strip_markdown_fences(text: str) -> str:
     stripped: str = text.strip()
     # Match optional language hint (e.g. ```json, ```sql, ```python …) followed
     # by content and a closing ```.
-    pattern: re.Pattern[str] = re.compile(
-        r"^```(?:\w+)?\s*([\s\S]*?)\s*```$", re.IGNORECASE
-    )
+    pattern: re.Pattern[str] = re.compile(r"^```(?:\w+)?\s*([\s\S]*?)\s*```$", re.IGNORECASE)
     match: re.Match[str] | None = pattern.match(stripped)
     if match:
         return match.group(1).strip()
@@ -166,10 +163,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
     raw_json: str = json.dumps(raw_records, indent=2, default=str)
-    full_prompt: str = (
-        f"{_SEED_SYSTEM_PROMPT}\n\n"
-        f"Raw data to clean:\n{raw_json}"
-    )
+    full_prompt: str = f"{_SEED_SYSTEM_PROMPT}\n\n" f"Raw data to clean:\n{raw_json}"
 
     # ── 2. Call the Gemini API ──────────────────────────────────────────────
     try:
@@ -183,7 +177,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
             model=model_name,
             contents=full_prompt,
         )
-        raw_response_text: str = response.text
+        raw_response_text: str = response.text or ""
     except Exception as exc:
         logger.exception("Gemini API call failed: %s", exc)
         raise HTTPException(
@@ -217,9 +211,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
             validated.append(HardwareCreate.model_validate(record))
         except ValidationError as exc:
             skipped += 1
-            logger.warning(
-                "Record at index %d failed Pydantic validation (skipped): %s", idx, exc
-            )
+            logger.warning("Record at index %d failed Pydantic validation (skipped): %s", idx, exc)
 
     if not validated:
         raise HTTPException(
@@ -323,10 +315,7 @@ def sanitize_sql(raw_sql: str) -> str:
     if not cleaned.upper().startswith("SELECT"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=(
-                "The AI did not return a SELECT statement. "
-                f"Received: {cleaned[:200]!r}"
-            ),
+            detail=("The AI did not return a SELECT statement. " f"Received: {cleaned[:200]!r}"),
         )
 
     # Tokenise on word boundaries for accurate keyword detection.
@@ -389,20 +378,19 @@ def text_to_sql(natural_language_query: str) -> str:
     model_name: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
-    full_prompt: str = (
-        f"{_SEARCH_SYSTEM_PROMPT}\n\n"
-        f"User query: {natural_language_query}"
-    )
+    full_prompt: str = f"{_SEARCH_SYSTEM_PROMPT}\n\n" f"User query: {natural_language_query}"
 
     # ── 2. Call the Gemini API ──────────────────────────────────────────────
     try:
         client: genai.Client = genai.Client(api_key=api_key)
-        logger.info("Translating query to SQL via Gemini (%s): %r", model_name, natural_language_query)
+        logger.info(
+            "Translating query to SQL via Gemini (%s): %r", model_name, natural_language_query
+        )
         response: genai_types.GenerateContentResponse = client.models.generate_content(
             model=model_name,
             contents=full_prompt,
         )
-        raw_sql: str = response.text
+        raw_sql: str = response.text or ""
     except Exception as exc:
         logger.exception("Gemini API call failed during text-to-SQL: %s", exc)
         raise HTTPException(

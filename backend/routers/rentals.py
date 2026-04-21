@@ -11,8 +11,6 @@ guards to :mod:`backend.services.rental_service` so the HTTP layer remains
 thin and the core rules remain testable without the HTTP stack.
 """
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
@@ -20,7 +18,6 @@ from backend.database import get_db
 from backend.models import Rental
 from backend.schemas import RentalRead, RentRequest, ReturnRequest
 from backend.services.rental_service import rent_hardware, return_hardware
-
 
 router: APIRouter = APIRouter(prefix="/api/rentals", tags=["Rentals"])
 
@@ -89,13 +86,13 @@ def return_item(payload: ReturnRequest, db: Session = Depends(get_db)) -> Rental
 
 @router.get(
     "/my",
-    response_model=List[RentalRead],
+    response_model=list[RentalRead],
     summary="Get active rentals for a user",
 )
 def my_rentals(
     user_id: int = Query(..., description="Primary key of the user whose active rentals to fetch."),
     db: Session = Depends(get_db),
-) -> List[Rental]:
+) -> list[Rental]:
     """Return all currently active (not yet returned) rentals for a given user.
 
     A rental is considered *active* when its ``returned_at`` column is
@@ -110,8 +107,4 @@ def my_rentals(
         List of :class:`~backend.schemas.RentalRead` objects with
         ``returned_at == None``.
     """
-    return (
-        db.query(Rental)
-        .filter(Rental.user_id == user_id, Rental.returned_at.is_(None))
-        .all()
-    )
+    return db.query(Rental).filter(Rental.user_id == user_id, Rental.returned_at.is_(None)).all()

@@ -12,7 +12,6 @@ from fastapi.responses import JSONResponse
 from backend.database import init_db
 from backend.routers import admin, ai, auth, hardware, rentals
 
-
 app: FastAPI = FastAPI(
     title="Hardware Hub API",
     description="Internal hardware rental management system.",

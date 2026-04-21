@@ -9,7 +9,6 @@ the object graph in both directions without extra queries.
 from __future__ import annotations
 
 import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -59,14 +58,10 @@ class Hardware(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    brand: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    purchase_date: Mapped[Optional[datetime.date]] = mapped_column(
-        DateTime, nullable=True
-    )
-    status: Mapped[str] = mapped_column(
-        String, nullable=False, default="Available", index=True
-    )
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    brand: Mapped[str | None] = mapped_column(String, nullable=True)
+    purchase_date: Mapped[datetime.date | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="Available", index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     rentals: Mapped[list[Rental]] = relationship(
         "Rental", back_populates="hardware", cascade="all, delete-orphan"
@@ -103,9 +98,7 @@ class Rental(Base):
     rented_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )
-    returned_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime, nullable=True
-    )
+    returned_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped[User] = relationship("User", back_populates="rentals")
     hardware: Mapped[Hardware] = relationship("Hardware", back_populates="rentals")

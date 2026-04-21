@@ -13,13 +13,12 @@ Test matrix
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.database import Base
 from backend.models import Hardware, User
 from backend.services.rental_service import rent_hardware
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -107,9 +106,9 @@ def test_successful_rent(db: Session, seeded_db: dict[str, int]) -> None:
     assert rental.returned_at is None, "A fresh rental should have no return timestamp."
 
     db.refresh(rental.hardware)
-    assert rental.hardware.status == "In Use", (
-        "Hardware status must be updated to 'In Use' upon successful rental."
-    )
+    assert (
+        rental.hardware.status == "In Use"
+    ), "Hardware status must be updated to 'In Use' upon successful rental."
 
 
 def test_rent_repair_gear_fails(db: Session, seeded_db: dict[str, int]) -> None:
@@ -130,9 +129,7 @@ def test_rent_repair_gear_fails(db: Session, seeded_db: dict[str, int]) -> None:
             hardware_id=seeded_db["repair_id"],
         )
 
-    assert exc_info.value.status_code == 409, (
-        "Renting 'Repair' gear must return HTTP 409 Conflict."
-    )
+    assert exc_info.value.status_code == 409, "Renting 'Repair' gear must return HTTP 409 Conflict."
 
     hw = db.get(Hardware, seeded_db["repair_id"])
     assert hw is not None
@@ -156,9 +153,7 @@ def test_rent_in_use_gear_fails(db: Session, seeded_db: dict[str, int]) -> None:
             hardware_id=seeded_db["in_use_id"],
         )
 
-    assert exc_info.value.status_code == 409, (
-        "Renting 'In Use' gear must return HTTP 409 Conflict."
-    )
+    assert exc_info.value.status_code == 409, "Renting 'In Use' gear must return HTTP 409 Conflict."
 
     hw = db.get(Hardware, seeded_db["in_use_id"])
     assert hw is not None

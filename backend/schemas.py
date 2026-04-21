@@ -14,10 +14,9 @@ schema so that SQLAlchemy ORM instances can be passed directly to
 from __future__ import annotations
 
 import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
 
 # ── User ──────────────────────────────────────────────────────────────────────
 
@@ -65,10 +64,10 @@ class HardwareCreate(BaseModel):
     """
 
     name: str = Field(..., min_length=1)
-    brand: Optional[str] = None
-    purchase_date: Optional[datetime.date] = None
+    brand: str | None = None
+    purchase_date: datetime.date | None = None
     status: Literal["Available", "In Use", "Repair"] = Field(default="Available")
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class HardwareUpdate(BaseModel):
@@ -84,11 +83,11 @@ class HardwareUpdate(BaseModel):
         notes: Updated notes.
     """
 
-    name: Optional[str] = None
-    brand: Optional[str] = None
-    purchase_date: Optional[datetime.date] = None
-    status: Optional[Literal["Available", "In Use", "Repair"]] = None
-    notes: Optional[str] = None
+    name: str | None = None
+    brand: str | None = None
+    purchase_date: datetime.date | None = None
+    status: Literal["Available", "In Use", "Repair"] | None = None
+    notes: str | None = None
 
 
 class HardwareRead(BaseModel):
@@ -107,10 +106,10 @@ class HardwareRead(BaseModel):
 
     id: int
     name: str
-    brand: Optional[str]
-    purchase_date: Optional[datetime.date]
+    brand: str | None
+    purchase_date: datetime.date | None
     status: str
-    notes: Optional[str]
+    notes: str | None
 
 
 # ── AI Search ──────────────────────────────────────────────────────────────────
@@ -186,4 +185,4 @@ class RentalRead(BaseModel):
     user_id: int
     hardware_id: int
     rented_at: datetime.datetime
-    returned_at: Optional[datetime.datetime]
+    returned_at: datetime.datetime | None

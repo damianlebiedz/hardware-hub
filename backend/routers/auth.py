@@ -13,8 +13,6 @@ session management**.  The frontend stores the returned object in
 JWT with hashed passwords) before any production or public deployment.**
 """
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -22,7 +20,6 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import User
 from backend.schemas import UserRead
-
 
 router: APIRouter = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -73,9 +70,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> User:
     Raises:
         HTTPException (404): If no user with the supplied email exists.
     """
-    user: Optional[User] = (
-        db.query(User).filter(User.email == payload.email).first()
-    )
+    user: User | None = db.query(User).filter(User.email == payload.email).first()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

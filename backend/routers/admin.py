@@ -9,8 +9,6 @@ As with other admin-gated endpoints in this MVP, the role check is performed
 via the ``X-User-Role`` request header rather than a verified JWT claim.
 """
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,11 +17,10 @@ from backend.database import get_db
 from backend.models import User
 from backend.schemas import UserCreate, UserRead
 
-
 router: APIRouter = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 
-def _require_admin(x_user_role: Optional[str]) -> None:
+def _require_admin(x_user_role: str | None) -> None:
     """Raise HTTP 403 if the caller is not an admin.
 
     Args:
@@ -53,7 +50,7 @@ def _require_admin(x_user_role: Optional[str]) -> None:
 def create_user(
     payload: UserCreate,
     db: Session = Depends(get_db),
-    x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
 ) -> User:
     """Register a new user account in the system.
 
@@ -77,11 +74,11 @@ def create_user(
     db.add(user)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A user with email '{payload.email}' already exists.",
-        )
+        ) from exc
     db.refresh(user)
     return user

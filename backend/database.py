@@ -7,10 +7,10 @@ exploited by the test suite to substitute an in-memory SQLite database.
 """
 
 import os
+from collections.abc import Generator
 
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
-
 
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
@@ -48,7 +48,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     """Yield a SQLAlchemy ``Session`` and guarantee it is closed afterwards.
 
     Designed for use as a FastAPI dependency::

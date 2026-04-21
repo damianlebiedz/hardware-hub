@@ -1,0 +1,99 @@
+# Hardware Hub — CI/CD Pipeline
+#
+# Trigger strategy
+# ----------------
+# The workflow fires on every push to `main`.  To simulate the business rule
+# "only merges from the `develop` branch are allowed", the first job step
+# inspects the merge-commit parents: if the triggering commit is a merge and
+# its second parent (the branch being merged in) does NOT trace back to
+# `develop`, the pipeline fails immediately.  Direct pushes (e.g. the initial
+# commit) are allowed through so as not to break bootstrapping.
+#
+# Pipeline steps (all must pass; any failure fails the run)
+# ---------------------------------------------------------
+# 1. Checkout code
+# 2. Verify source branch is `develop` (merge-commit guard)
+# 3. Set up Python 3.12
+# 4. Install Poetry
+# 5. Install all dependencies (including dev group: black, ruff, mypy)
+# 6. black --check   — formatting
+# 7. ruff check      — linting
+# 8. mypy            — static type checking
+# 9. pytest          — business-logic test suite
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  # Also run on pull-requests targeting main so that checks are visible
+  # before the merge (complementary to the post-merge push trigger).
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  quality-gate:
+    name: Quality Gate (Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history so we can inspect merge-commit parents.
+          fetch-depth: 0
+
+      # ── 2. Develop-branch guard ──────────────────────────────────────────
+      # Simulate the rule: merges to `main` must originate from `develop`.
+      # On a pull-request event the source branch is already known; on a push
+      # event we inspect the merge-commit second parent.
+      - name: Verify source branch is develop
+        if: github.event_name == 'push'
+        run: |
+          COMMIT_COUNT=$(git log --merges -1 --pretty=format:%P HEAD | wc -w)
+          if [ "$COMMIT_COUNT" -ge 2 ]; then
+            SECOND_PARENT=$(git log --merges -1 --pretty=format:%P HEAD | awk '{print $2}')
+            SOURCE_BRANCH=$(git name-rev --name-only "$SECOND_PARENT" 2>/dev/null || echo "unknown")
+            echo "Merge detected. Source resolved as: $SOURCE_BRANCH"
+            if [[ "$SOURCE_BRANCH" != *"develop"* ]]; then
+              echo "ERROR: Pushes to main must be merged from the 'develop' branch."
+              echo "       Detected source: $SOURCE_BRANCH"
+              exit 1
+            fi
+            echo "Source branch check passed: $SOURCE_BRANCH"
+          else
+            echo "Not a merge commit — allowing direct push (e.g. initial commit)."
+          fi
+
+      # ── 3. Python setup ───────────────────────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ── 4. Install Poetry ─────────────────────────────────────────────────
+      - name: Install Poetry
+        run: pip install poetry
+
+      # ── 5. Install dependencies ───────────────────────────────────────────
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      # ── 6. Black — formatting check ───────────────────────────────────────
+      - name: Check formatting (black)
+        run: poetry run black --check backend/ tests/
+
+      # ── 7. Ruff — linting ────────────────────────────────────────────────
+      - name: Lint (ruff)
+        run: poetry run ruff check backend/ tests/
+
+      # ── 8. Mypy — static type checking ───────────────────────────────────
+      - name: Type check (mypy)
+        run: poetry run mypy backend/
+
+      # ── 9. Pytest — business-logic test suite ────────────────────────────
+      - name: Run tests (pytest)
+        run: poetry run pytest tests/ -v

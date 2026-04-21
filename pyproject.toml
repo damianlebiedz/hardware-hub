@@ -6,7 +6,7 @@ authors = [
     {name = "Hardware Hub Team"}
 ]
 readme = "README.md"
-requires-python = "^3.12"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi (>=0.136.0,<0.137.0)",
     "uvicorn (>=0.45.0,<0.46.0)",
@@ -20,3 +20,56 @@ dependencies = [
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+# ── Tool configuration ─────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+# Exclude generated / vendored files
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.mypy_cache
+  | __pycache__
+  | dist
+  | frontend
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "frontend", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle  F: pyflakes  I: isort  UP: pyupgrade  B: flake8-bugbear
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line too long — black handles this
+    "B008",  # do not perform function calls in default args (FastAPI Depends pattern)
+]
+
+[tool.mypy]
+python_version = "3.12"
+# We do not enforce strict mode globally — third-party stubs are often absent.
+ignore_missing_imports = true
+# Treat any untyped def in our own modules as an error.
+disallow_untyped_defs = true
+# Warn on redundant casts and unused ignores.
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Exclude non-backend paths from type-checking.
+exclude = ["frontend/", "tests/", "\\.venv/"]
+
+[dependency-groups]
+dev = [
+    "black (>=26.3.1,<27.0.0)",
+    "ruff (>=0.15.11,<0.16.0)",
+    "mypy (>=1.20.1,<2.0.0)"
+]
