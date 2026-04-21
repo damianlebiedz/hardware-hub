@@ -5,9 +5,9 @@
       <div class="navbar-inner">
         <RouterLink to="/dashboard" class="navbar-brand">⚙ Hardware Hub</RouterLink>
         <div class="navbar-links">
-          <RouterLink to="/dashboard"  class="nav-link">Dashboard</RouterLink>
+          <RouterLink to="/dashboard"  class="nav-link">Hardware List</RouterLink>
           <RouterLink to="/my-rentals" class="nav-link">My Rentals</RouterLink>
-          <RouterLink v-if="user.role === 'admin'" to="/admin" class="nav-link">Admin</RouterLink>
+          <RouterLink v-if="user.role === 'admin'" to="/admin" class="nav-link">Admin Panel</RouterLink>
           <span class="navbar-user">{{ user.email }}</span>
           <button class="btn btn-ghost btn-sm" @click="logout">Sign out</button>
         </div>

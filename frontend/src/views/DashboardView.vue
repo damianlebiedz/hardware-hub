@@ -4,7 +4,7 @@
     <!-- Header row -->
     <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:1rem;">
       <div>
-        <h1>Hardware Dashboard</h1>
+        <h1>Hardware List</h1>
         <p class="text-muted mt-1">Browse and rent company equipment.</p>
       </div>
       <div class="flex items-center gap-2">
