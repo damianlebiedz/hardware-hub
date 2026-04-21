@@ -8,12 +8,24 @@ that the service is up and ready to accept traffic.
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from backend.database import init_db
+
 
 app: FastAPI = FastAPI(
     title="Hardware Hub API",
     description="Internal hardware rental management system.",
     version="0.1.0",
 )
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    """Initialise the database tables on application startup.
+
+    Runs ``Base.metadata.create_all`` once when the Uvicorn worker starts.
+    This is idempotent — existing tables are not modified.
+    """
+    init_db()
 
 
 @app.get(
