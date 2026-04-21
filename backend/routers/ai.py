@@ -6,9 +6,9 @@ Exposes two endpoints:
   hardware records, sanitizes them via the Gemini API, and bulk-inserts the
   cleaned data into the database.
 
-* ``POST /api/ai/search`` — accepts a natural-language query, translates it
-  to a safe SQLite ``SELECT`` via Gemini (Text-to-SQL), executes it against
-  the ``hardware`` table, and returns the matching rows as JSON.
+* ``POST /api/ai/search`` — accepts a natural-language query, sends all
+  hardware records to Gemini (LLM-as-filter), and returns the matching rows
+  as JSON.
 
 Detailed documentation for the service layer lives in
 :mod:`backend.services.ai_service`.
@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import Hardware
 from backend.schemas import HardwareRead, SearchRequest, SeedResponse
-from backend.services.ai_service import SanitizeResult, sanitize_with_gemini, text_to_sql
+from backend.services.ai_service import SanitizeResult, llm_filter_hardware, sanitize_with_gemini
 
 router: APIRouter = APIRouter(prefix="/api/ai", tags=["AI"])
 
@@ -124,11 +124,10 @@ def seed_hardware(
 @router.post(
     "/search",
     response_model=list[HardwareRead],
-    summary="Natural-language semantic search (Text-to-SQL)",
+    summary="Natural-language semantic search (LLM-as-filter)",
     responses={
         200: {"description": "Query executed; matching hardware rows returned."},
-        422: {"description": "LLM output failed the SQL security gate."},
-        502: {"description": "Gemini API call failed."},
+        502: {"description": "Gemini API call failed or returned unparseable output."},
         503: {"description": "GEMINI_API_KEY is not configured."},
     },
 )
@@ -136,37 +135,29 @@ def search_hardware(
     payload: SearchRequest,
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """Translate a natural-language query to SQL and return matching hardware rows.
+    """Send all hardware records to the LLM and return semantically matching rows.
 
     **Full pipeline flow:**
 
-    1. **Input**: Client POSTs ``{"query": "Show me broken Apple laptops"}``
+    1. **Input**: Client POSTs ``{"query": "I need something to test a mobile app on"}``
        to this endpoint.
 
-    2. **Text-to-SQL via Gemini**: The query is forwarded to
-       :func:`~backend.services.ai_service.text_to_sql`, which sends a prompt
-       to Gemini containing:
+    2. **Fetch all records**: All rows from the ``hardware`` table are loaded
+       and serialised as a JSON array.  If the database is empty, an empty
+       list is returned immediately without touching the LLM.
 
-       * The exact SQLite DDL for the ``hardware`` table (column names,
-         types, valid status values).
-       * Strict instructions to return *only* a ``SELECT`` statement with no
-         markdown, no explanation, and no data-modification keywords.
-       * The user's natural-language query.
+    3. **LLM-as-filter via Gemini**: The full record list and the user's query
+       are forwarded to
+       :func:`~backend.services.ai_service.llm_filter_hardware`.  Gemini reads
+       every record, applies semantic reasoning, and returns only the integer
+       IDs of matching records.  This supports intent-based queries (e.g.
+       "something to test a mobile app on" returns phones and tablets) that
+       cannot be expressed as SQL column filters.
 
-    3. **Critical security gate**: The LLM response passes through
-       :func:`~backend.services.ai_service.sanitize_sql`, which:
-
-       * Strips any markdown code fences (`` ```sql ... ``` ``).
-       * Asserts the cleaned string begins with ``SELECT``.
-       * Tokenises the query and rejects it if any of the following forbidden
-         keywords are present: ``DROP``, ``DELETE``, ``UPDATE``, ``INSERT``,
-         ``PRAGMA``, ``ALTER``, ``CREATE``.
-
-       A query that fails either check raises HTTP 422 immediately — the
-       database is never touched.
-
-    4. **Execution**: The sanitized SQL is executed against the SQLite
-       ``hardware`` table using SQLAlchemy's ``text()`` construct.
+    4. **ID-based retrieval**: The backend executes a targeted
+       ``SELECT … WHERE id IN (…)`` query using the validated integer IDs
+       returned by the LLM, preserving the order in which the model returned
+       them.
 
     5. **Serialisation**: Each result row is converted to a dict (keyed by
        column name) and returned as a JSON array.
@@ -176,28 +167,46 @@ def search_hardware(
         db: Injected SQLAlchemy session.
 
     Returns:
-        A list of hardware row dicts matching the translated SQL query.
-        Each dict contains the same fields as :class:`~backend.schemas.HardwareRead`.
+        A list of hardware row dicts that the LLM determined to match the
+        query.  Each dict contains the same fields as
+        :class:`~backend.schemas.HardwareRead`.
 
     Raises:
         HTTPException (503): If ``GEMINI_API_KEY`` is not set.
-        HTTPException (502): If the Gemini API call fails.
-        HTTPException (422): If the generated SQL fails the security gate.
+        HTTPException (502): If the Gemini API call fails or returns
+            non-parseable output.
         HTTPException (500): If SQL execution against the database fails.
     """
-    # ── Step 2 + 3: Translate + sanitize ────────────────────────────────────
-    safe_sql: str = text_to_sql(payload.query)
+    # ── Step 2: Fetch all hardware records ───────────────────────────────────
+    all_result = db.execute(text("SELECT * FROM hardware"))
+    columns: list[str] = list(all_result.keys())
+    all_records: list[dict[str, Any]] = [
+        dict(zip(columns, row, strict=True)) for row in all_result.fetchall()
+    ]
 
-    # ── Step 4: Execute against the database ────────────────────────────────
+    if not all_records:
+        return []
+
+    # ── Step 3: Ask LLM to filter by semantic relevance ──────────────────────
+    matching_ids: list[int] = llm_filter_hardware(payload.query, all_records)
+
+    if not matching_ids:
+        return []
+
+    # ── Step 4: Fetch only the matched rows ───────────────────────────────────
+    id_list: str = ", ".join(str(i) for i in matching_ids)
     try:
-        result = db.execute(text(safe_sql))
+        matched_result = db.execute(text(f"SELECT * FROM hardware WHERE id IN ({id_list})"))
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"SQL execution failed: {exc}",
         ) from exc
 
-    # ── Step 5: Map rows to JSON-serialisable dicts ──────────────────────────
-    columns: list[str] = list(result.keys())
-    rows: list[dict[str, Any]] = [dict(zip(columns, row, strict=True)) for row in result.fetchall()]
-    return rows
+    # ── Step 5: Serialise, preserving LLM-returned order ─────────────────────
+    matched_columns: list[str] = list(matched_result.keys())
+    rows_by_id: dict[int, dict[str, Any]] = {
+        int(row[matched_columns.index("id")]): dict(zip(matched_columns, row, strict=True))
+        for row in matched_result.fetchall()
+    }
+    return [rows_by_id[i] for i in matching_ids if i in rows_by_id]

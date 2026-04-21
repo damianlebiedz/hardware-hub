@@ -233,10 +233,10 @@ In an AI-augmented world, choosing *how* to use AI is as important as using it a
 **The AI Solution:** I implemented an "AI Seed Importer" feature for the Admin. Before the data hits the database, the raw JSON payload is sent to the LLM. The AI acts as a data sanitizer: resolving ID collisions, fixing typographical errors, and logically deducing missing statuses. 
 **Result:** Safe, resilient data migration without losing records, wrapped in a sleek, non-blocking UI modal.
 
-### 2. Semantic Search via Text-to-SQL
-**The Problem:** Passing the entire database to an LLM to find specific items is a bad architectural pattern. It doesn't scale, violates token limits, and causes significant latency.
-**The AI Solution:** Instead of sending data to the AI, we send the *schema* and the user's natural language query to the AI to generate a raw `SELECT` SQL statement. The backend securely validates this (preventing prompt injection) and executes it against a read-only connection.
-**Result:** O(1) token usage regardless of database size, extremely low latency, infinite scalability, and an intuitive UI with distinct "Standard" and "AI-Mode" states.
+### 2. Semantic Search via LLM-as-Filter
+**The Problem:** Users need to find hardware using natural-language, use-case driven queries — e.g. *"I need something to test a mobile app on"* should return phones and tablets. A Text-to-SQL approach (translating the query into a SQL `SELECT`) only works when the query maps directly to an explicit schema column (`brand`, `status`, `purchase_date`). Use-case queries have no corresponding column, so the LLM is forced to hallucinate — producing incorrect results (e.g. returning Samsung when asked for "US companies").
+**The AI Solution:** The backend fetches all hardware records and sends them — together with the user's natural-language query — to the LLM. The LLM acts as a semantic filter: it reads every record, understands the intent of the query, and returns only the IDs of the records that genuinely match. The backend then retrieves exactly those rows and returns them.
+**Result:** True semantic understanding regardless of which columns exist in the schema. An intuitive UI with distinct "Standard" and "AI-Mode" states, and an unchanged API contract — the frontend required zero changes.
 
 ---
 
@@ -406,6 +406,28 @@ The fix spans both layers:
 
 Admin accounts can only be provisioned through the bootstrap mechanism (environment variables at startup), which is an intentional, auditable, ops-level action.
 
+**Semantic Search returning wrong results (Text-to-SQL schema blindness):** The original semantic search implementation translated natural-language queries into SQL `SELECT` statements via the Gemini API. The LLM was given the exact database schema DDL and instructed to generate a safe, read-only query. This worked correctly for queries that map directly to schema columns — e.g. *"show all items in Repair"* correctly produced `WHERE status = 'Repair'`. However, the implementation broke silently for use-case queries like *"I need something to test a mobile app on"* or *"all gear from US companies"*: the `hardware` table has no `category`, `country_of_origin`, or `use_case` column. The LLM had no column to filter on, so it fell back on its own world knowledge to guess brand names — and guessed wrong, returning Samsung (a South Korean company) as a US company. The failure was entirely silent: the endpoint returned HTTP 200 with plausible-looking but factually incorrect results.
+
+This was identified by manually testing the feature against the requirement: *"I need something to test a mobile app on" → returns iPhones/Androids"* (from the original specification). The root cause was not a bug in the SQL generation logic itself, but a fundamental mismatch between what Text-to-SQL can express and what the feature actually needs to support: semantic, intent-based retrieval that is independent of schema structure.
+
+The fix replaces the Text-to-SQL pipeline with an **LLM-as-filter** approach:
+- **Backend (`ai_service.py`):** Removed `text_to_sql()`, `sanitize_sql()`, `_SEARCH_SYSTEM_PROMPT`, `_HARDWARE_SCHEMA_DDL`, and `_FORBIDDEN_KEYWORDS`. Added `llm_filter_hardware(query, records)`: fetches all hardware records, serializes them to JSON, and sends them to the LLM with a prompt instructing it to return only the IDs of records that semantically match the query. The response is parsed as a JSON integer array; any non-conforming response raises HTTP 502.
+- **Backend (`routers/ai.py`):** Updated `POST /api/ai/search` to fetch all rows first, pass them to `llm_filter_hardware`, and return only the matched rows. Short-circuits with an empty list if the database is empty.
+- **Frontend:** Zero changes — the API contract (`SearchRequest` in, `list[HardwareRead]` out) is identical.
+
+**Why this is a hack and what to do next:**
+This approach trades scalability for correctness. Token usage is now O(n) in the number of hardware records: every search sends the full dataset to the LLM. For a small company inventory (tens to low hundreds of items) this is entirely acceptable. As the dataset grows into the thousands, the approach will hit model context-window limits, incur significant per-query costs, and introduce noticeable latency.
+
+The production-grade replacement is **embedding-based vector search**:
+1. When a hardware record is created or updated, generate a vector embedding of its fields (name, brand, notes, etc.) using the Gemini Embedding API or equivalent.
+2. Store the embedding alongside the record — either in a dedicated vector store (Qdrant, Chroma, Weaviate) or in Postgres with the `pgvector` extension.
+3. At search time, embed the user's query into the same vector space and retrieve the top-k nearest neighbours by cosine similarity.
+4. This reduces per-query token usage to a single embedding call (O(1) in dataset size) and enables sub-second retrieval even over millions of records.
+
+Until that infrastructure is in place, the LLM-as-filter approach is a pragmatic and correct MVP solution.
+
+---
+
 ### The Prompt Trail
 
 <details>
@@ -502,6 +524,122 @@ Analyze my technical context and produce two markdown files:
 
 ```text
 @INSTRUCTIONS_FOR_AGENTS.md @ARCHITECTURE.md Analyze the instructions and strictly execute Step 1/2/.../7.
+```
+
+</details>
+
+<details>
+<summary><b>Semantic Search Rework — LLM-as-Filter (Cursor Agent with Sonnet 4.6)</b></summary>
+
+```text
+Task: Replace the Text-to-SQL semantic search pipeline with an LLM-as-filter approach.
+
+## Context
+
+The current POST /api/ai/search endpoint translates a natural-language query into a SQL SELECT
+statement via Gemini and executes it. This only works when the query maps to an explicit schema
+column. Use-case queries like "I need something to test a mobile app on" or "all gear from US
+companies" have no matching column, so the LLM hallucinates — returning factually incorrect
+results (e.g. Samsung appearing in "US companies" results). The fix is to send the full list of
+hardware records to the LLM and let it act as a semantic filter, returning only the IDs of
+records that genuinely match the query.
+
+## Requirements
+
+### 1. backend/services/ai_service.py
+
+Remove the following identifiers entirely (they are no longer used):
+  - text_to_sql()
+  - sanitize_sql()
+  - _SEARCH_SYSTEM_PROMPT
+  - _HARDWARE_SCHEMA_DDL
+  - _FORBIDDEN_KEYWORDS
+
+Add a new function with the signature:
+
+  def llm_filter_hardware(query: str, records: list[dict[str, Any]]) -> list[int]:
+
+Behaviour:
+  - If GEMINI_API_KEY is not set, raise HTTPException 503 (same pattern as sanitize_with_gemini).
+  - If records is empty, return [] immediately without calling the API.
+  - Build a prompt that contains:
+      a) A system instruction telling the LLM it is a hardware search assistant. It must read
+         the provided JSON array of hardware records and return ONLY a valid JSON array of
+         integer IDs of the records that semantically match the user's query.
+         It must not include explanations, markdown fences, or any other text.
+         If no records match, it must return an empty JSON array: []
+      b) The full records list serialised with json.dumps.
+      c) The user's natural-language query.
+  - Call the Gemini API (same client/model pattern as the rest of the file).
+  - Strip markdown fences from the response using _strip_markdown_fences.
+  - Parse the response with json.loads. If parsing fails, or if the result is not a list, or
+    if any element is not an integer, raise HTTPException 502 with a descriptive detail message.
+  - Log: query text, number of records sent, and returned IDs (all at INFO level).
+  - If the Gemini call itself raises an exception, log it and raise HTTPException 502.
+  - Full PEP 484 type hints and a Google-style docstring are required.
+
+### 2. backend/routers/ai.py
+
+Update the POST /api/ai/search endpoint:
+  - Remove the import of text_to_sql (and sanitize_sql if imported).
+  - Import llm_filter_hardware from backend.services.ai_service.
+  - New pipeline inside search_hardware():
+      1. Query the database for all rows: db.execute(text("SELECT * FROM hardware")).
+      2. Serialise rows to list[dict] using column names as keys (same pattern already used
+         for the search result serialisation at the bottom of the function).
+      3. If the list is empty, return [] immediately.
+      4. Call llm_filter_hardware(payload.query, all_records) to get matching_ids.
+      5. If matching_ids is empty, return [].
+      6. Query the database for only those IDs:
+           SELECT * FROM hardware WHERE id IN (<matching_ids>)
+         Use SQLAlchemy's text() with a bindparam or inline the IDs safely (they are
+         validated integers, so interpolation is safe).
+      7. Serialise and return the result rows.
+  - Do not change the function signature, response_model, or any HTTP status codes.
+
+### 3. tests/test_ai_service.py
+
+Remove any tests that specifically cover text_to_sql() or sanitize_sql().
+
+Add tests for llm_filter_hardware() — mock the Gemini client (same mocking pattern already
+used in the file):
+
+  - test_llm_filter_hardware_returns_matching_ids:
+      Mock Gemini response text = "[1, 3]". Call with a two-record list and a query string.
+      Assert return value == [1, 3].
+
+  - test_llm_filter_hardware_empty_records_short_circuits:
+      Call with records=[]. Assert return value == [] and that the Gemini client was never
+      instantiated.
+
+  - test_llm_filter_hardware_empty_llm_result:
+      Mock Gemini response text = "[]". Assert return value == [].
+
+  - test_llm_filter_hardware_invalid_json_raises_502:
+      Mock Gemini response text = "not valid json". Assert HTTPException with status_code 502.
+
+  - test_llm_filter_hardware_non_array_raises_502:
+      Mock Gemini response text = '{"ids": [1]}'. Assert HTTPException with status_code 502.
+
+  - test_llm_filter_hardware_missing_api_key_raises_503:
+      Patch os.getenv to return None for GEMINI_API_KEY. Assert HTTPException status_code 503.
+
+### 4. Constraints
+
+  - Do NOT modify the SearchRequest or HardwareRead schemas.
+  - Do NOT modify the frontend in any way.
+  - Do NOT modify the seed importer pipeline (sanitize_with_gemini, _SEED_SYSTEM_PROMPT, etc.).
+  - All new code must have full type hints and Google-style docstrings.
+  - After editing, run: poetry run ruff check backend/ tests/ and poetry run mypy backend/
+    and fix any reported issues before finishing.
+
+## Deliverables
+
+  - Updated backend/services/ai_service.py
+  - Updated backend/routers/ai.py
+  - Updated tests/test_ai_service.py
+  - A short summary of which functions were removed, which were added, and the exact
+    runtime behaviour of the new search endpoint.
 ```
 
 </details>

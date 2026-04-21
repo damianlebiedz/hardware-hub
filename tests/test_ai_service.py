@@ -1,24 +1,14 @@
-"""Tests for the sanitize_with_gemini validation loop in ai_service.
+"""Tests for the AI service layer in Hardware Hub.
 
-Focus: prove that the fix for the non-dict item bug (AttributeError on
-``record.pop("id", None)`` when Gemini returns a primitive instead of a
-dict) works correctly.
+Covers two functions:
 
-Before the fix the loop was:
+* :func:`~backend.services.ai_service.sanitize_with_gemini` — validates that
+  the non-dict item fix (AttributeError guard) works correctly and that the
+  normal happy-path validation behaviour is unchanged.
 
-    for idx, record in enumerate(cleaned_records):
-        record.pop("id", None)          # <── outside try/except
-        try:
-            validated.append(HardwareCreate.model_validate(record))
-        except ValidationError as exc:
-            ...
-
-A non-dict item (int, str, None, …) would raise AttributeError here,
-which was NOT caught, resulting in an unhandled 500 Internal Server Error.
-
-After the fix every step is inside a single try/except that catches
-TypeError, AttributeError, and ValidationError, so primitive items are
-silently skipped and only a 422 is raised when *every* item fails.
+* :func:`~backend.services.ai_service.llm_filter_hardware` — validates the
+  LLM-as-filter semantic search pipeline: correct ID parsing, empty-record
+  short-circuit, and all error paths (invalid JSON, non-array, missing key).
 
 Strategy
 --------
@@ -34,7 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from backend.services.ai_service import sanitize_with_gemini
+from backend.services.ai_service import llm_filter_hardware, sanitize_with_gemini
 
 # ---------------------------------------------------------------------------
 # Minimal valid hardware dict (satisfies HardwareCreate without an id field)
@@ -212,3 +202,118 @@ class TestNormalValidationBehaviour:
 
         assert len(result.records) == 1
         assert result.changes == []
+
+
+# ---------------------------------------------------------------------------
+# Helper — mock Gemini for llm_filter_hardware (returns raw text, not a list)
+# ---------------------------------------------------------------------------
+
+
+def _mock_gemini_text(response_text: str) -> MagicMock:
+    """Return a mock genai.Client whose generate_content returns *response_text* verbatim."""
+    mock_response = MagicMock()
+    mock_response.text = response_text
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    mock_client_cls = MagicMock(return_value=mock_client)
+    return mock_client_cls
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+_SAMPLE_RECORDS: list[dict] = [
+    {"id": 1, "name": "Apple iPhone 13 Pro Max", "brand": "Apple", "status": "Available"},
+    {"id": 2, "name": "Dell XPS 15", "brand": "Dell", "status": "Available"},
+    {"id": 3, "name": "Samsung Galaxy S21", "brand": "Samsung", "status": "In Use"},
+]
+
+
+# ---------------------------------------------------------------------------
+# Tests — llm_filter_hardware
+# ---------------------------------------------------------------------------
+
+
+class TestLlmFilterHardware:
+    """Tests for the LLM-as-filter semantic search pipeline."""
+
+    def test_returns_matching_ids(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Happy path: Gemini returns a JSON array of IDs; function returns them as ints."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        with patch(
+            "backend.services.ai_service.genai.Client", _mock_gemini_text("[1, 3]")
+        ):
+            result = llm_filter_hardware("mobile phones", _SAMPLE_RECORDS)
+
+        assert result == [1, 3]
+
+    def test_empty_records_short_circuits_without_api_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When records=[], return [] immediately and never call the Gemini API."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        mock_cls = _mock_gemini_text("[]")
+        with patch("backend.services.ai_service.genai.Client", mock_cls):
+            result = llm_filter_hardware("anything", [])
+
+        assert result == []
+        mock_cls.assert_not_called()
+
+    def test_empty_llm_result_returns_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When Gemini returns '[]', function returns an empty list without error."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        with patch(
+            "backend.services.ai_service.genai.Client", _mock_gemini_text("[]")
+        ):
+            result = llm_filter_hardware("nothing matches", _SAMPLE_RECORDS)
+
+        assert result == []
+
+    def test_invalid_json_raises_502(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When Gemini returns non-JSON text, HTTPException 502 is raised."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        with patch(
+            "backend.services.ai_service.genai.Client",
+            _mock_gemini_text("not valid json at all"),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                llm_filter_hardware("query", _SAMPLE_RECORDS)
+
+        assert exc_info.value.status_code == 502
+
+    def test_non_array_json_raises_502(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When Gemini returns a JSON object instead of an array, HTTPException 502 is raised."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        with patch(
+            "backend.services.ai_service.genai.Client",
+            _mock_gemini_text('{"ids": [1, 2]}'),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                llm_filter_hardware("query", _SAMPLE_RECORDS)
+
+        assert exc_info.value.status_code == 502
+
+    def test_array_with_non_integer_elements_raises_502(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the returned array contains non-integer elements, HTTPException 502 is raised."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        with patch(
+            "backend.services.ai_service.genai.Client",
+            _mock_gemini_text('["one", "two"]'),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                llm_filter_hardware("query", _SAMPLE_RECORDS)
+
+        assert exc_info.value.status_code == 502
+
+    def test_missing_api_key_raises_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When GEMINI_API_KEY is absent, HTTPException 503 is raised before any API call."""
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        with pytest.raises(HTTPException) as exc_info:
+            llm_filter_hardware("query", _SAMPLE_RECORDS)
+
+        assert exc_info.value.status_code == 503
