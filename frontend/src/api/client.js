@@ -73,6 +73,9 @@ export const createHardware = (data) => request('POST', '/hardware', data)
 /** Partially update a hardware item (admin only — toggles status, etc.). */
 export const updateHardware = (id, data) => request('PUT', `/hardware/${id}`, data)
 
+/** Permanently delete a hardware item (admin only). */
+export const deleteHardware = (id) => request('DELETE', `/hardware/${id}`)
+
 // ── Rentals ──────────────────────────────────────────────────────────────────
 
 /** Rent a hardware item. */

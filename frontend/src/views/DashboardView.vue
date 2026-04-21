@@ -7,9 +7,63 @@
         <h1>Hardware Dashboard</h1>
         <p class="text-muted mt-1">Browse and rent company equipment.</p>
       </div>
-      <button class="btn btn-ghost btn-sm" @click="loadHardware" title="Refresh list">
-        ↻ Refresh
-      </button>
+      <div class="flex items-center gap-2">
+        <!-- Add Hardware button — admin only -->
+        <div v-if="isAdmin" style="position:relative;">
+          <button
+            class="btn btn-primary btn-sm"
+            @click="toggleAddForm"
+            title="Add new hardware item"
+          >
+            + Add Hardware
+          </button>
+
+          <!-- Add Hardware popover -->
+          <Transition name="popover">
+            <div v-if="showAddForm" class="add-popover">
+              <div class="add-popover-header">
+                <span>New Hardware</span>
+                <button class="btn-icon" @click="closeAddForm" title="Close">✕</button>
+              </div>
+              <form @submit.prevent="handleAddHardware" class="add-popover-body">
+                <div class="form-group">
+                  <label>Name *</label>
+                  <input v-model="newItem.name" class="input" placeholder="MacBook Pro 14"" required minlength="1" />
+                </div>
+                <div class="form-group mt-1">
+                  <label>Brand</label>
+                  <input v-model="newItem.brand" class="input" placeholder="Apple" />
+                </div>
+                <div class="form-group mt-1">
+                  <label>Purchase Date</label>
+                  <input v-model="newItem.purchase_date" class="input" type="date" />
+                </div>
+                <div class="form-group mt-1">
+                  <label>Status</label>
+                  <select v-model="newItem.status">
+                    <option value="Available">Available</option>
+                    <option value="In Use">In Use</option>
+                    <option value="Repair">Repair</option>
+                  </select>
+                </div>
+                <div class="form-group mt-1">
+                  <label>Notes</label>
+                  <input v-model="newItem.notes" class="input" placeholder="Optional notes…" />
+                </div>
+                <div v-if="addError" class="alert alert-error mt-1" style="font-size:.8rem;">{{ addError }}</div>
+                <button type="submit" class="btn btn-primary mt-2 w-full" :disabled="addLoading">
+                  <span v-if="addLoading" class="spinner"></span>
+                  {{ addLoading ? 'Adding…' : 'Add Item' }}
+                </button>
+              </form>
+            </div>
+          </Transition>
+        </div>
+
+        <button class="btn btn-ghost btn-sm" @click="loadHardware" title="Refresh list">
+          ↻ Refresh
+        </button>
+      </div>
     </div>
 
     <!-- Search bar + AI toggle -->
@@ -89,6 +143,7 @@
               <th>Purchase Date</th>
               <th>Notes</th>
               <th>Action</th>
+              <th v-if="isAdmin"></th>
             </tr>
           </thead>
           <tbody>
@@ -114,6 +169,18 @@
                 </button>
                 <span v-else class="text-muted" style="font-size:.8rem;">—</span>
               </td>
+              <!-- Delete button — admin only -->
+              <td v-if="isAdmin">
+                <button
+                  class="btn btn-sm btn-danger delete-btn"
+                  :disabled="deletingId === item.id"
+                  @click="handleDelete(item)"
+                  title="Delete this item"
+                >
+                  <span v-if="deletingId === item.id" class="spinner"></span>
+                  <span v-else>✕</span>
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -124,14 +191,18 @@
     <div v-if="rentSuccess" class="alert alert-success mt-2">{{ rentSuccess }}</div>
 
   </div>
+
+  <!-- Backdrop for closing the add popover when clicking outside -->
+  <div v-if="showAddForm" class="popover-backdrop" @click="closeAddForm"></div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { listHardware, rentHardware, aiSearch } from '../api/client.js'
+import { listHardware, rentHardware, aiSearch, createHardware, deleteHardware } from '../api/client.js'
 import { getStoredUser } from '../api/client.js'
 
-const user = getStoredUser()
+const user    = getStoredUser()
+const isAdmin = user?.role === 'admin'
 
 // ── Hardware data ───────────────────────────────────────────────────────────
 const allHardware = ref([])
@@ -237,12 +308,77 @@ async function handleRent(item) {
   try {
     await rentHardware(user.id, item.id)
     rentSuccess.value = `✓ "${item.name}" has been rented to you.`
-    // Update status locally for immediate feedback
     item.status = 'In Use'
   } catch (err) {
     error.value = err.message || 'Failed to rent item.'
   } finally {
     rentingId.value = null
+  }
+}
+
+// ── Delete (admin only) ───────────────────────────────────────────────────────
+const deletingId = ref(null)
+
+async function handleDelete(item) {
+  if (!confirm(`Delete "${item.name}"?\n\nThis will permanently remove the item and all its rental history.`)) return
+  deletingId.value = item.id
+  error.value      = ''
+  try {
+    await deleteHardware(item.id)
+    allHardware.value = allHardware.value.filter(h => h.id !== item.id)
+  } catch (err) {
+    error.value = err.message || 'Failed to delete item.'
+  } finally {
+    deletingId.value = null
+  }
+}
+
+// ── Add Hardware (admin only) ─────────────────────────────────────────────────
+const showAddForm = ref(false)
+const addLoading  = ref(false)
+const addError    = ref('')
+
+const newItem = ref({
+  name: '',
+  brand: '',
+  purchase_date: '',
+  status: 'Available',
+  notes: '',
+})
+
+function toggleAddForm() {
+  showAddForm.value = !showAddForm.value
+  if (!showAddForm.value) resetAddForm()
+}
+
+function closeAddForm() {
+  showAddForm.value = false
+  resetAddForm()
+}
+
+function resetAddForm() {
+  addError.value = ''
+  newItem.value  = { name: '', brand: '', purchase_date: '', status: 'Available', notes: '' }
+}
+
+async function handleAddHardware() {
+  addError.value = ''
+  addLoading.value = true
+  try {
+    const payload = {
+      name:          newItem.value.name.trim(),
+      brand:         newItem.value.brand.trim() || null,
+      purchase_date: newItem.value.purchase_date || null,
+      status:        newItem.value.status,
+      notes:         newItem.value.notes.trim() || null,
+    }
+    const created = await createHardware(payload)
+    allHardware.value = [...allHardware.value, created]
+    closeAddForm()
+  } catch (err) {
+    addError.value = err.message || 'Failed to add hardware.'
+  } finally {
+    addLoading.value = false
   }
 }
 
@@ -255,3 +391,56 @@ function statusClass(status) {
   }[status] ?? ''
 }
 </script>
+
+<style scoped>
+/* ── Add Hardware popover ────────────────────────────────────────────────── */
+.add-popover {
+  position: absolute;
+  top: calc(100% + .5rem);
+  right: 0;
+  width: 300px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  z-index: 200;
+}
+
+.add-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: .9rem;
+}
+
+.add-popover-body {
+  padding: 1rem;
+}
+
+.popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+/* ── Popover enter/leave transition ─────────────────────────────────────── */
+.popover-enter-active,
+.popover-leave-active {
+  transition: opacity .15s ease, transform .15s ease;
+}
+.popover-enter-from,
+.popover-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* ── Delete button subtle styling ─────────────────────────────────────── */
+.delete-btn {
+  padding: .25rem .55rem;
+  font-size: .8rem;
+  min-width: 28px;
+}
+</style>

@@ -150,6 +150,45 @@ def create_hardware(
     return hw
 
 
+@router.delete(
+    "/{hardware_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a hardware item (admin only)",
+)
+def delete_hardware(
+    hardware_id: int,
+    db: Session = Depends(get_db),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
+) -> None:
+    """Permanently remove a hardware item and all associated rental records.
+
+    The ``Hardware`` ORM model is configured with ``cascade='all,
+    delete-orphan'`` on its ``rentals`` relationship, so all linked
+    ``Rental`` rows are deleted automatically within the same transaction.
+
+    Args:
+        hardware_id: Primary key of the hardware item to delete.
+        db: Injected SQLAlchemy session.
+        x_user_role: Value of the ``X-User-Role`` request header; must be
+            ``'admin'``.
+
+    Raises:
+        HTTPException (403): If caller is not an admin.
+        HTTPException (404): If no hardware item with ``hardware_id`` exists.
+    """
+    _require_admin(x_user_role)
+
+    hw: Hardware | None = db.get(Hardware, hardware_id)
+    if hw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Hardware with id={hardware_id} not found.",
+        )
+
+    db.delete(hw)
+    db.commit()
+
+
 @router.put(
     "/{hardware_id}",
     response_model=HardwareRead,
