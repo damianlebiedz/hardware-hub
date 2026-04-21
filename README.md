@@ -273,6 +273,8 @@ A ready-to-copy template of all variables is in [`.env.example`](.env.example).
 
 - The bootstrap password is hashed with bcrypt via the same `hash_password()` utility used everywhere else.
 - The plaintext password is read once from the environment and never logged or stored.
+- Treat `BOOTSTRAP_ADMIN_PASSWORD` as a production secret: provide it via a secret manager/CI secret, never commit it to git, and avoid sharing it in plain `.env` files.
+- For production, prefer running bootstrap only for initial provisioning (`BOOTSTRAP_ADMIN_ENABLED=false` afterwards) and rotate the admin password immediately after first login.
 
 ---
 
@@ -288,7 +290,11 @@ No signed access token, refresh token, or HTTP-only cookie session is issued.
 **Why:** This project is a timeboxed MVP focused on proving the rental workflow, AI seed import, and semantic search.  
 Implementing full token/session lifecycle security (JWT/OIDC, refresh, revocation, hardened cookie handling) was deferred to keep delivery scope realistic.
 
-**Production warning:** This shortcut is not sufficient for production and must be replaced with a proper auth/session architecture before public or sensitive deployment.
+**Production warning:** This shortcut is not sufficient for production and must be replaced before public or sensitive deployment.
+Minimum production baseline:
+- Use OAuth2/OIDC (or equivalent SSO) and issue signed tokens (JWT/PASETO) server-side.
+- Prefer HTTP-only, Secure, SameSite cookies for session transport (instead of frontend-managed `localStorage` auth state).
+- Add refresh-token rotation, token expiry, logout/revocation, and server-side authorization checks (never trust role headers from the client).
 
 * **Fully Implemented:** * Strict Rental Logic Guardrails (preventing impossible states).
   * 100% Type-hinted backend with comprehensive docstrings.
@@ -297,7 +303,7 @@ Implementing full token/session lifecycle security (JWT/OIDC, refresh, revocatio
   * **The "Why":** Implementing robust JWT would consume ~20% of the allocated time. This simple session hack is sufficient to demonstrate role-based access for the MVP.
   * **Security note:** Passwords are never stored in plaintext and password hashes are never returned in API responses.
   * **Migration impact:** Existing SQLite users created before password hashes were introduced cannot log in until an admin recreates or resets their account with a password.
-  * **The "Future":** In production, this must be replaced with OAuth2/OIDC or a proper HTTP-only cookie JWT implementation.
+  * **The "Future":** In production, this must be replaced with OAuth2/OIDC (or equivalent IdP), signed tokens, HTTP-only Secure cookies, refresh rotation, and proper revocation/logout handling.
 * **Next Steps (24h Roadmap):**
   1. Refactor authentication to JWT/SSO.
   2. ...
