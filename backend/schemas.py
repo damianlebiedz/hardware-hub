@@ -113,6 +113,23 @@ class HardwareRead(BaseModel):
     notes: Optional[str]
 
 
+# ── AI Seed ────────────────────────────────────────────────────────────────────
+
+
+class SeedResponse(BaseModel):
+    """Response returned by the ``POST /api/ai/seed`` endpoint.
+
+    Summarises the outcome of an AI-assisted bulk import operation.
+
+    Attributes:
+        inserted: Number of hardware rows successfully written to the database.
+        items: Full representation of every inserted hardware record.
+    """
+
+    inserted: int
+    items: list[HardwareRead]
+
+
 # ── Rental ─────────────────────────────────────────────────────────────────────
 
 

@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from backend.database import init_db
-from backend.routers import admin, auth, hardware, rentals
+from backend.routers import admin, ai, auth, hardware, rentals
 
 
 app: FastAPI = FastAPI(
@@ -23,6 +23,7 @@ app.include_router(auth.router)
 app.include_router(hardware.router)
 app.include_router(rentals.router)
 app.include_router(admin.router)
+app.include_router(ai.router)
 
 
 @app.on_event("startup")
