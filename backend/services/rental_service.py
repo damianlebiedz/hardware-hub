@@ -143,7 +143,7 @@ def return_hardware(db: Session, rental_id: int) -> Rental:
             detail=f"Rental id={rental_id} has already been returned.",
         )
 
-    rental.returned_at = datetime.datetime.utcnow()
+    rental.returned_at = datetime.datetime.now(datetime.UTC)
     rental.hardware.status = "Available"
     db.commit()
     db.refresh(rental)
