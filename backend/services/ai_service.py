@@ -242,6 +242,9 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
         response: genai_types.GenerateContentResponse = client.models.generate_content(
             model=model_name,
             contents=full_prompt,
+            config=genai_types.GenerateContentConfig(
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0)
+            ),
         )
         raw_response_text: str = response.text or ""
     except Exception as exc:
@@ -399,6 +402,9 @@ def llm_filter_hardware(query: str, records: list[dict[str, Any]]) -> list[int]:
         response: genai_types.GenerateContentResponse = client.models.generate_content(
             model=model_name,
             contents=full_prompt,
+            config=genai_types.GenerateContentConfig(
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0)
+            ),
         )
         raw_response: str = response.text or ""
     except Exception as exc:
