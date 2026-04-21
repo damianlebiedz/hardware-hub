@@ -6,6 +6,7 @@ that the service is up and ready to accept traffic.
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.database import init_db
@@ -16,6 +17,19 @@ app: FastAPI = FastAPI(
     title="Hardware Hub API",
     description="Internal hardware rental management system.",
     version="0.1.0",
+)
+
+# ── CORS ───────────────────────────────────────────────────────────────────────
+# Allow the Vite dev server (port 5173) and the Docker-served frontend (port
+# 5173 mapped by docker-compose) to call the API.  In production behind nginx
+# the frontend and API share the same origin so CORS is not strictly needed,
+# but it is harmless and simplifies local development.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ── Routers ────────────────────────────────────────────────────────────────────

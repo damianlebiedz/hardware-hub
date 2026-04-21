@@ -23,12 +23,13 @@ services:
       retries: 3
       start_period: 10s
 
-  # ── Frontend (Vue.js — placeholder for Step 6) ───────────────────────────────
-  # This service is intentionally minimal; it will be replaced with a proper
-  # Vite/Vue build in Step 6.  Using nginx:alpine as a stand-in so the Compose
-  # file is valid and the network is configured from the start.
+  # ── Frontend (Vue.js + Vite, served by nginx) ────────────────────────────────
+  # Multi-stage build: Node 22 compiles the Vite/Vue app, then nginx:alpine
+  # serves the static bundle and proxies /api/* to the backend container.
   frontend:
-    image: nginx:alpine
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: hardware-hub-frontend
     restart: unless-stopped
     ports:
