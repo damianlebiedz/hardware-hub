@@ -396,6 +396,16 @@ This was identified as a limitation after the initial implementation was complet
 
 The result is a fully auditable import: the admin can verify every decision the AI made before navigating away.
 
+**Admin could create other admins (privilege escalation via UI):** The original implementation of the "Add User" form in the Admin Panel included a role selector with two options — `User` and `Admin`. This meant that any admin could freely promote a newly created account to admin status through the UI, bypassing any intent to restrict privileged access. From a security standpoint, this is a privilege-escalation vector: a compromised admin account could silently mint additional admin accounts, and there was no architectural decision or requirement that justified allowing it. The `POST /api/admin/users` endpoint likewise accepted a `role` field of either `"admin"` or `"user"` in its request schema, so the backend offered no defence either.
+
+The fix spans both layers:
+- **Backend (`schemas.py`):** Removed the `role` field from `UserCreate` entirely. The endpoint now unconditionally assigns `role="user"` to every account it creates.
+- **Backend (`routers/admin.py`):** `create_user` hardcodes `role="user"` when constructing the ORM object, independent of any client-supplied value.
+- **Frontend (`views/AdminView.vue`):** Removed the role `<select>` element and the associated `newRole` reactive ref. The form now only collects email and password.
+- **Frontend (`api/client.js`):** Removed the `role` parameter from `createUser()`.
+
+Admin accounts can only be provisioned through the bootstrap mechanism (environment variables at startup), which is an intentional, auditable, ops-level action.
+
 ### The Prompt Trail
 
 <details>

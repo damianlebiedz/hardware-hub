@@ -19,13 +19,6 @@
                    placeholder="user@company.com" required />
           </div>
           <div class="form-group mt-1">
-            <label for="new-role">Role</label>
-            <select id="new-role" v-model="newRole">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <div class="form-group mt-1">
             <label for="new-password">Temporary password</label>
             <input id="new-password" v-model="newPassword" type="password" class="input"
                    placeholder="At least 8 characters" required minlength="8" />
@@ -141,7 +134,6 @@ const router = useRouter()
 
 // ── Add user state ──────────────────────────────────────────────────────────
 const newEmail    = ref('')
-const newRole     = ref('user')
 const newPassword = ref('')
 const userLoading = ref(false)
 const userError   = ref('')
@@ -151,10 +143,9 @@ async function handleCreateUser() {
   userError.value = userSuccess.value = ''
   userLoading.value = true
   try {
-    const user = await createUser(newEmail.value.trim(), newRole.value, newPassword.value)
-    userSuccess.value = `User "${user.email}" created with role "${user.role}".`
+    const user = await createUser(newEmail.value.trim(), newPassword.value)
+    userSuccess.value = `User "${user.email}" created.`
     newEmail.value = ''
-    newRole.value  = 'user'
     newPassword.value = ''
   } catch (err) {
     userError.value = err.message || 'Failed to create user.'

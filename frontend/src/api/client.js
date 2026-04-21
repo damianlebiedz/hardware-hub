@@ -51,9 +51,9 @@ export const login = (email, password) => request('POST', '/auth/login', { email
 
 // ── Admin ───────────────────────────────────────────────────────────────────
 
-/** Create a new user account (admin only). */
-export const createUser = (email, role, password) =>
-  request('POST', '/admin/users', { email, role, password })
+/** Create a new user account (admin only). Always creates a 'user'-role account. */
+export const createUser = (email, password) =>
+  request('POST', '/admin/users', { email, password })
 
 // ── Hardware ─────────────────────────────────────────────────────────────────
 

@@ -55,9 +55,11 @@ def create_user(
 ) -> User:
     """Register a new user account in the system.
 
+    The created account always receives the ``'user'`` role.  Admin accounts
+    can only be provisioned via the bootstrap mechanism (env vars at startup).
+
     Args:
-        payload: JSON body containing ``email``, ``password`` and optional ``role``
-            (defaults to ``'user'``).
+        payload: JSON body containing ``email`` and ``password``.
         db: Injected SQLAlchemy session.
         x_user_role: Value of the ``X-User-Role`` request header; must be
             ``'admin'``.
@@ -73,7 +75,7 @@ def create_user(
 
     user: User = User(
         email=str(payload.email),
-        role=payload.role,
+        role="user",
         password_hash=hash_password(payload.password),
     )
     db.add(user)

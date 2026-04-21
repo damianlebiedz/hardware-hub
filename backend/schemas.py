@@ -26,13 +26,16 @@ class UserCreate(BaseModel):
 
     Attributes:
         email: Valid email address; must be unique in the database.
-        role: Access level — either ``'admin'`` or ``'user'``.
         password: Plain-text password accepted on creation and hashed before
             persistence.
+
+    Note:
+        Accounts created via this schema are always assigned the ``'user'``
+        role.  Admin accounts can only be provisioned via the bootstrap
+        mechanism (environment variables at startup).
     """
 
     email: EmailStr
-    role: Literal["admin", "user"] = Field(default="user")
     password: str = Field(..., min_length=8)
 
 
