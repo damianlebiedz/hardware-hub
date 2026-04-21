@@ -205,13 +205,18 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> list[HardwareCrea
     skipped: int = 0
 
     for idx, record in enumerate(cleaned_records):
-        # Drop auto-assigned IDs returned by Gemini — the DB will assign them.
-        record.pop("id", None)
         try:
+            # Guard against non-dict items (e.g. ints or strings) that Gemini
+            # may occasionally return inside the array — .pop() would raise
+            # AttributeError on anything that is not a mapping.
+            if not isinstance(record, dict):
+                raise TypeError(f"Expected a dict, got {type(record).__name__}")
+            # Drop auto-assigned IDs returned by Gemini — the DB will assign them.
+            record.pop("id", None)
             validated.append(HardwareCreate.model_validate(record))
-        except ValidationError as exc:
+        except (TypeError, AttributeError, ValidationError) as exc:
             skipped += 1
-            logger.warning("Record at index %d failed Pydantic validation (skipped): %s", idx, exc)
+            logger.warning("Record at index %d is invalid and was skipped: %s", idx, exc)
 
     if not validated:
         raise HTTPException(
