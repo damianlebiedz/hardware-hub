@@ -22,10 +22,108 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import Hardware
-from backend.schemas import HardwareRead, SearchRequest, SeedResponse
+from backend.schemas import (
+    HardwareRead,
+    SearchRequest,
+    SeedFieldChange,
+    SeedPreviewRecord,
+    SeedPreviewResponse,
+    SeedResponse,
+)
 from backend.services.ai_service import SanitizeResult, llm_filter_hardware, sanitize_with_gemini
 
 router: APIRouter = APIRouter(prefix="/api/ai", tags=["AI"])
+
+
+@router.post(
+    "/seed/preview",
+    response_model=SeedPreviewResponse,
+    status_code=status.HTTP_200_OK,
+    summary="AI-assisted seed preview — sanitize without inserting",
+    responses={
+        200: {"description": "Records sanitized; review the proposed changes before confirming."},
+        422: {"description": "All records failed schema validation after LLM cleaning."},
+        502: {"description": "Gemini API call failed or returned unparseable output."},
+        503: {"description": "GEMINI_API_KEY or GEMINI_MODEL is not configured."},
+    },
+)
+def preview_seed(
+    raw_payload: list[Any],
+    db: Session = Depends(get_db),
+) -> SeedPreviewResponse:
+    """Sanitize raw hardware records with Gemini and return proposed changes without inserting.
+
+    This endpoint runs the full AI sanitization pipeline but stops before
+    writing anything to the database.  It also resolves ID conflicts: if a
+    raw record's ``id`` is already taken in the database (or duplicated within
+    the batch), a new available ID is proposed and shown as a correction.
+
+    Args:
+        raw_payload: A JSON array of raw hardware objects.
+        db: Injected SQLAlchemy session (read-only — used to check existing IDs).
+
+    Returns:
+        :class:`~backend.schemas.SeedPreviewResponse` with ``total`` count
+        and a ``records`` list where each entry contains the AI-proposed
+        values, a resolved ``proposed_id``, and a field-level diff.
+
+    Raises:
+        HTTPException (503): If ``GEMINI_API_KEY`` or ``GEMINI_MODEL`` is not set.
+        HTTPException (502): If the Gemini API call fails.
+        HTTPException (422): If every record fails validation.
+    """
+    result: SanitizeResult = sanitize_with_gemini(raw_payload)
+    changes_by_index: dict[int, list] = {c.index: c.changes for c in result.changes}
+
+    # ── ID conflict resolution ─────────────────────────────────────────────
+    existing_ids: set[int] = {
+        row[0] for row in db.execute(text("SELECT id FROM hardware")).fetchall()
+    }
+    next_id: int = (max(existing_ids) + 1) if existing_ids else 1
+    batch_ids: set[int] = set()  # IDs already assigned to earlier records in this batch
+
+    records: list[SeedPreviewRecord] = []
+    for hw, orig_idx in zip(result.records, result.record_indices, strict=True):
+        field_changes: list[SeedFieldChange] = list(changes_by_index.get(orig_idx, []))
+
+        # Extract original id from raw payload (may be camelCase or integer).
+        raw: dict[str, Any] = raw_payload[orig_idx] if orig_idx < len(raw_payload) else {}
+        raw_id: int | None = None
+        if isinstance(raw, dict) and "id" in raw:
+            try:
+                raw_id = int(raw["id"])
+            except (TypeError, ValueError):
+                raw_id = None
+
+        proposed_id: int | None = None
+        if raw_id is not None:
+            if raw_id not in existing_ids and raw_id not in batch_ids:
+                # Original ID is free — keep it.
+                proposed_id = raw_id
+            else:
+                # ID is taken — find the next available slot.
+                while next_id in existing_ids or next_id in batch_ids:
+                    next_id += 1
+                proposed_id = next_id
+                next_id += 1
+                # Surface the reassignment as a visible correction.
+                field_changes = [
+                    SeedFieldChange(field="id", before=str(raw_id), after=str(proposed_id))
+                ] + field_changes
+
+        if proposed_id is not None:
+            batch_ids.add(proposed_id)
+
+        records.append(
+            SeedPreviewRecord(
+                index=orig_idx,
+                proposed=hw,
+                proposed_id=proposed_id,
+                changes=field_changes,
+            )
+        )
+
+    return SeedPreviewResponse(total=len(records), records=records)
 
 
 @router.post(
@@ -59,7 +157,7 @@ def seed_hardware(
        IDs — all common artefacts of legacy data exports.
 
     2. **AI sanitization**: The raw array is sent to the Gemini API
-       (``gemini-2.5-flash`` by default) accompanied by a strict system prompt.
+       (model set via ``GEMINI_MODEL`` env var) accompanied by a strict system prompt.
        Gemini is instructed to:
 
        * Fix brand typos (``"Appel"`` → ``"Apple"``).

@@ -163,6 +163,41 @@ class SeedRecordChange(BaseModel):
     changes: list[SeedFieldChange]
 
 
+class SeedPreviewRecord(BaseModel):
+    """A single proposed record from the AI preview pipeline.
+
+    Attributes:
+        index: Zero-based position of this record in the original raw payload.
+        proposed: The AI-cleaned record ready for insertion.
+        proposed_id: The integer ID to use on insert.  Set to the original
+            raw ID when it is free; reassigned to the next available ID when
+            the original is already taken; ``None`` when the raw record had no
+            ``id`` field (database auto-assigns).
+        changes: Field-level corrections applied by the AI or by the ID
+            conflict resolver (empty if none).
+    """
+
+    index: int
+    proposed: HardwareCreate
+    proposed_id: int | None = None
+    changes: list[SeedFieldChange] = Field(default_factory=list)
+
+
+class SeedPreviewResponse(BaseModel):
+    """Response returned by ``POST /api/ai/seed/preview``.
+
+    Returns the AI-sanitized records without inserting them, allowing the
+    caller to review and selectively confirm which records to import.
+
+    Attributes:
+        total: Total number of records that passed AI sanitization.
+        records: Per-record preview with proposed values and change diffs.
+    """
+
+    total: int
+    records: list[SeedPreviewRecord]
+
+
 class SeedResponse(BaseModel):
     """Response returned by the ``POST /api/ai/seed`` endpoint.
 

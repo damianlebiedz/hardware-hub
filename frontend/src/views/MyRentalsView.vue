@@ -8,8 +8,7 @@
       <button class="btn btn-ghost btn-sm" @click="loadRentals">↻ Refresh</button>
     </div>
 
-    <div v-if="error"   class="alert alert-error mt-2">{{ error }}</div>
-    <div v-if="success" class="alert alert-success mt-2">{{ success }}</div>
+    <div v-if="error" class="alert alert-error mt-2">{{ error }}</div>
 
     <div class="mt-2">
       <div v-if="loading" style="text-align:center; padding:3rem;">
@@ -29,17 +28,15 @@
         <table>
           <thead>
             <tr>
-              <th>Rental ID</th>
               <th>Hardware</th>
-              <th>Brand</th>
-              <th>Rented At</th>
-              <th>Action</th>
+              <th style="width:130px">Brand</th>
+              <th style="width:160px">Rented At</th>
+              <th style="width:110px">Action</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="rental in rentals" :key="rental.id">
-              <td class="text-muted">#{{ rental.id }}</td>
-              <td>
+              <td style="white-space:normal">
                 <strong>{{ rental.hardware_name || `Hardware #${rental.hardware_id}` }}</strong>
               </td>
               <td>{{ rental.hardware_brand || '—' }}</td>
@@ -47,11 +44,11 @@
               <td>
                 <button
                   class="btn btn-sm btn-danger"
+                  style="width:100%; justify-content:center;"
                   :disabled="returningId === rental.id"
                   @click="handleReturn(rental)"
                 >
-                  <span v-if="returningId === rental.id" class="spinner"></span>
-                  <span v-else>Return</span>
+                  Return
                 </button>
               </td>
             </tr>
@@ -60,6 +57,13 @@
       </div>
     </div>
   </div>
+
+  <Transition name="toast">
+    <div v-if="toast" class="action-toast" role="alert">
+      <span>{{ toast }}</span>
+      <button style="margin-left:.5rem; background:none; border:none; color:inherit; cursor:pointer; font-size:1rem; line-height:1;" @click="toast = ''">×</button>
+    </div>
+  </Transition>
 </template>
 
 <script setup>
@@ -73,14 +77,19 @@ const user = getStoredUser()
 const rentals     = ref([])
 const loading     = ref(false)
 const error       = ref('')
-const success     = ref('')
 const returningId = ref(null)
+const toast       = ref('')
+let toastTimer    = null
+function showToast(msg) {
+  toast.value = msg
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = '' }, 4000)
+}
 
 async function loadRentals() {
   if (!user) return
   loading.value = true
   error.value   = ''
-  success.value = ''
   try {
     const [rentalList, hardwareList] = await Promise.all([
       myRentals(user.id),
@@ -105,11 +114,9 @@ onMounted(loadRentals)
 async function handleReturn(rental) {
   returningId.value = rental.id
   error.value       = ''
-  success.value     = ''
   try {
     await returnHardware(rental.id)
-    success.value = `✓ "${rental.hardware_name ?? 'Item'}" has been returned successfully.`
-    // Remove from list immediately
+    showToast(`✓ "${rental.hardware_name ?? 'Item'}" returned successfully.`)
     rentals.value = rentals.value.filter(r => r.id !== rental.id)
   } catch (err) {
     error.value = err.message || 'Failed to return item.'
@@ -118,6 +125,7 @@ async function handleReturn(rental) {
   }
 }
 
+// ── helpers ───────────────────────────────────────────────────────────────────
 function formatDate(iso) {
   if (!iso) return '—'
   try {
@@ -130,3 +138,23 @@ function formatDate(iso) {
   }
 }
 </script>
+
+<style scoped>
+.action-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  background: #166534;
+  color: #fff;
+  padding: .6rem 1rem;
+  border-radius: var(--radius, 8px);
+  font-size: .85rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  max-width: 360px;
+}
+.toast-enter-active, .toast-leave-active { transition: opacity .2s, transform .2s; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
+</style>

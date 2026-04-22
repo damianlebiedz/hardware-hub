@@ -18,7 +18,7 @@ Environment variables
     Required.  Google AI API key.
     Obtain from https://aistudio.google.com/app/apikey.
 ``GEMINI_MODEL``
-    Optional.  Gemini model identifier.  Defaults to ``gemini-2.5-flash``.
+    Required.  Gemini model identifier.
 """
 
 import json
@@ -46,34 +46,30 @@ _SEED_SYSTEM_PROMPT: str = """
 You are a data-cleaning agent for a hardware asset management system.
 You will receive a JSON array of hardware records that may contain errors.
 
-Your task is to return a CLEANED version of the same array, applying ALL of
-the following rules without exception:
+Return a CLEANED version of the same array applying ONLY these conservative rules:
 
-1. **Brand typos**: Correct obvious brand name misspellings.
+1. **Brand typos**: Fix only highly confident brand misspellings.
    Examples: "Appel" → "Apple", "Samsug" → "Samsung", "Lenoco" → "Lenovo".
+   When in doubt, leave the value unchanged.
 
-2. **Date normalisation**: Convert every date to ISO-8601 format "YYYY-MM-DD".
-   If a date is missing or unparseable, set the field to null.
+2. **Date normalisation**: Convert any parseable date to ISO-8601 "YYYY-MM-DD".
+   NEVER set a date to null — if a date value exists and is parseable in any
+   form, keep it and only normalise the format.
+   Set to null only if the value is completely absent or totally unparseable.
 
-3. **Status normalisation**: Map every status value to exactly one of:
-   "Available", "In Use", or "Repair".
-   Mapping rules:
-   - If status is already one of the three valid values, keep it as-is.
-   - If the notes field mentions damage, broken, cracked, fault, repair, or
-     similar, set status to "Repair".
-   - Otherwise, set status to "Available".
+3. **Status**: Keep "Available", "In Use", and "Repair" exactly as-is.
+   Map obvious synonyms only: "broken"/"damaged"/"cracked"/"fault" → "Repair";
+   "rented"/"loaned"/"checked out" → "In Use".
+   If the status is missing or unclear, infer it from the notes field
+   (e.g. notes mentioning damage → "Repair").  When in doubt → "Available".
 
-4. **Duplicate ID resolution**: If two or more records share the same integer
-   "id" field, re-assign unique sequential integers starting from 1, preserving
-   the original order.  If no "id" field is present, omit it entirely from the
-   output (the database will auto-assign).
+4. **Duplicate IDs**: Re-assign unique sequential integers starting from 1
+   if any "id" values are duplicated.  Omit "id" entirely if absent.
 
-5. **Output format**: Return ONLY a valid JSON array.  Do NOT include any
-   explanation, markdown code fences, or extra text.  The response must be
-   parseable by json.loads() with no pre-processing.
+5. **Output**: Return ONLY a valid JSON array — no explanation, no markdown.
 
-6. **Field retention**: Preserve all other fields exactly as provided.  Do
-   not add or remove fields beyond what the rules above require.
+6. **Field retention**: Do NOT add, rename, or null-out fields beyond what
+   these rules require.  If a field needs no correction, leave it exactly as-is.
 """.strip()
 
 # ---------------------------------------------------------------------------
@@ -122,10 +118,14 @@ class SanitizeResult:
             ready for bulk insertion.
         changes: Per-record corrections made by the AI; only records with at
             least one modified field are included.
+        record_indices: Original zero-based position in the raw input payload
+            for each entry in ``records``.  Parallel list to ``records``
+            (``record_indices[i]`` is the source index of ``records[i]``).
     """
 
     records: list[HardwareCreate]
     changes: list[SeedRecordChange] = dc_field(default_factory=list)
+    record_indices: list[int] = dc_field(default_factory=list)
 
 
 def _compute_record_diff(
@@ -225,7 +225,15 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
             ),
         )
 
-    model_name: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name: str | None = os.getenv("GEMINI_MODEL")
+    if not model_name:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "GEMINI_MODEL environment variable is not set. "
+                "The AI seed importer is unavailable."
+            ),
+        )
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
     raw_json: str = json.dumps(raw_records, indent=2, default=str)
@@ -242,9 +250,6 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
         response: genai_types.GenerateContentResponse = client.models.generate_content(
             model=model_name,
             contents=full_prompt,
-            config=genai_types.GenerateContentConfig(
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=0)
-            ),
         )
         raw_response_text: str = response.text or ""
     except Exception as exc:
@@ -272,6 +277,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
     # ── 5. Pydantic validation + diff computation ───────────────────────────
     validated: list[HardwareCreate] = []
     changes: list[SeedRecordChange] = []
+    record_indices: list[int] = []
     skipped: int = 0
 
     for idx, record in enumerate(cleaned_records):
@@ -283,8 +289,13 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
                 raise TypeError(f"Expected a dict, got {type(record).__name__}")
             # Drop auto-assigned IDs returned by Gemini — the DB will assign them.
             record.pop("id", None)
+            # Normalise camelCase purchaseDate → snake_case purchase_date so
+            # that Pydantic can parse it even when Gemini preserves the original key.
+            if "purchaseDate" in record and "purchase_date" not in record:
+                record["purchase_date"] = record.pop("purchaseDate")
             hw = HardwareCreate.model_validate(record)
             validated.append(hw)
+            record_indices.append(idx)
 
             # Compute diff against the original raw record at the same position.
             raw = raw_records[idx] if idx < len(raw_records) else {}
@@ -308,7 +319,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
         logger.warning("%d record(s) were skipped due to validation errors.", skipped)
 
     logger.info("%d record(s) passed validation and will be inserted.", len(validated))
-    return SanitizeResult(records=validated, changes=changes)
+    return SanitizeResult(records=validated, changes=changes, record_indices=record_indices)
 
 
 # ---------------------------------------------------------------------------
@@ -377,10 +388,18 @@ def llm_filter_hardware(query: str, records: list[dict[str, Any]]) -> list[int]:
             ),
         )
 
+    model_name: str | None = os.getenv("GEMINI_MODEL")
+    if not model_name:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "GEMINI_MODEL environment variable is not set. "
+                "The AI search feature is unavailable."
+            ),
+        )
+
     if not records:
         return []
-
-    model_name: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
     records_json: str = json.dumps(records, indent=2, default=str)
@@ -402,9 +421,6 @@ def llm_filter_hardware(query: str, records: list[dict[str, Any]]) -> list[int]:
         response: genai_types.GenerateContentResponse = client.models.generate_content(
             model=model_name,
             contents=full_prompt,
-            config=genai_types.GenerateContentConfig(
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=0)
-            ),
         )
         raw_response: str = response.text or ""
     except Exception as exc:
@@ -424,9 +440,7 @@ def llm_filter_hardware(query: str, records: list[dict[str, Any]]) -> list[int]:
         ids: list[int] = []
         for item in parsed:
             if not isinstance(item, int):
-                raise ValueError(
-                    f"Expected integer IDs, got {type(item).__name__}: {item!r}."
-                )
+                raise ValueError(f"Expected integer IDs, got {type(item).__name__}: {item!r}.")
             ids.append(item)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.error(

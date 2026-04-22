@@ -19,6 +19,7 @@
   --shadow-md:   0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
 }
 
+html { scrollbar-gutter: stable; }
 html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; color: var(--text); background: var(--bg); }
 #app { min-height: 100vh; display: flex; flex-direction: column; }
 
@@ -54,11 +55,13 @@ p  { line-height: 1.6; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary   { background: var(--brand);   color: var(--white); }
 .btn-primary:hover:not(:disabled)  { background: var(--brand-dark); }
+.btn-ai        { background: var(--brand); color: var(--white); }
+.btn-ai:hover:not(:disabled)       { background: var(--brand-dark); }
 .btn-danger    { background: var(--danger);  color: var(--white); }
 .btn-danger:hover:not(:disabled)   { background: var(--danger-dark); }
 .btn-ghost     { background: transparent; color: var(--brand); border: 1px solid var(--brand); }
 .btn-ghost:hover:not(:disabled)    { background: var(--brand-light); }
-.btn-sm { padding: .3rem .75rem; font-size: .8rem; }
+.btn-sm { padding: .3rem .75rem; font-size: .8rem; height: 1.875rem; }
 .btn-icon {
   padding: .35rem .5rem; background: transparent; border: none;
   cursor: pointer; color: var(--text-muted); border-radius: var(--radius);
@@ -118,10 +121,11 @@ p  { line-height: 1.6; }
 
 /* ── Table ────────────────────────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+table { width: 100%; border-collapse: collapse; font-size: .875rem; table-layout: fixed; }
 thead { background: var(--bg); }
-th { padding: .65rem 1rem; text-align: left; font-weight: 600; color: var(--text-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; }
-td { padding: .7rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th { padding: .65rem 1rem; text-align: left; font-weight: 600; color: var(--text-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+td { padding: .7rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tbody tr { height: 3.375rem; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--bg); }
 

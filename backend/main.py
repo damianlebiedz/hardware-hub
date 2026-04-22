@@ -6,6 +6,8 @@ that the service is up and ready to accept traffic.
 """
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +19,35 @@ from backend.services.bootstrap import bootstrap_admin
 
 logging.basicConfig(level=logging.INFO)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan handler.
+
+    Runs initialisation tasks on startup before yielding control to the
+    application request loop.  Any teardown logic (connection pool close,
+    background task cancellation, etc.) should be placed after the ``yield``.
+
+    Steps:
+        1. ``init_db`` — creates all tables and applies SQLite column
+           compatibility patches (idempotent).
+        2. ``bootstrap_admin`` — ensures a first admin account exists
+           according to the ``BOOTSTRAP_ADMIN_*`` environment variables.
+    """
+    init_db()
+    db = SessionLocal()
+    try:
+        bootstrap_admin(db)
+    finally:
+        db.close()
+    yield
+
+
 app: FastAPI = FastAPI(
     title="Hardware Hub API",
     description="Internal hardware rental management system.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
@@ -42,24 +69,6 @@ app.include_router(hardware.router)
 app.include_router(rentals.router)
 app.include_router(admin.router)
 app.include_router(ai.router)
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    """Initialise the database and run the admin bootstrap on startup.
-
-    Steps:
-        1. ``init_db`` — creates all tables and applies SQLite column
-           compatibility patches (idempotent).
-        2. ``bootstrap_admin`` — ensures a first admin account exists
-           according to the ``BOOTSTRAP_ADMIN_*`` environment variables.
-    """
-    init_db()
-    db = SessionLocal()
-    try:
-        bootstrap_admin(db)
-    finally:
-        db.close()
 
 
 @app.get(

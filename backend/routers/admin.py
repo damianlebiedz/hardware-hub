@@ -142,13 +142,42 @@ def plain_seed(
 
     inserted_items: list[Hardware] = []
     rejected: list[PlainSeedRejection] = []
+    seen_ids: set[int] = set()  # track IDs already queued in this batch
 
     for i, raw in enumerate(raw_payload):
         try:
             if not isinstance(raw, dict):
                 raise ValueError("Record must be a JSON object.")
-            record = HardwareCreate(**raw)
+
+            # Extract optional id from the raw record.
+            raw_id: int | None = None
+            if "id" in raw:
+                try:
+                    raw_id = int(raw["id"])
+                except (TypeError, ValueError):
+                    raw_id = None  # non-integer id → ignored, DB auto-assigns
+
+            if raw_id is not None:
+                # Duplicate within this import batch.
+                if raw_id in seen_ids:
+                    raise ValueError(
+                        f"Duplicate ID {raw_id} in the import payload — "
+                        "only the first occurrence is accepted."
+                    )
+                # ID already present in the database.
+                if db.get(Hardware, raw_id) is not None:
+                    raise ValueError(f"ID {raw_id} already exists in the database.")
+                seen_ids.add(raw_id)
+
+            # Normalise camelCase purchaseDate → snake_case purchase_date.
+            normalized: dict = dict(raw)
+            if "purchaseDate" in normalized and "purchase_date" not in normalized:
+                normalized["purchase_date"] = normalized.pop("purchaseDate")
+
+            record = HardwareCreate(**{k: v for k, v in normalized.items() if k != "id"})
             hw = Hardware(**record.model_dump())
+            if raw_id is not None:
+                hw.id = raw_id
             db.add(hw)
             inserted_items.append(hw)
         except (ValidationError, ValueError, TypeError) as exc:

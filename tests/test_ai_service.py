@@ -243,9 +243,7 @@ class TestLlmFilterHardware:
     def test_returns_matching_ids(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Happy path: Gemini returns a JSON array of IDs; function returns them as ints."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
-        with patch(
-            "backend.services.ai_service.genai.Client", _mock_gemini_text("[1, 3]")
-        ):
+        with patch("backend.services.ai_service.genai.Client", _mock_gemini_text("[1, 3]")):
             result = llm_filter_hardware("mobile phones", _SAMPLE_RECORDS)
 
         assert result == [1, 3]
@@ -265,9 +263,7 @@ class TestLlmFilterHardware:
     def test_empty_llm_result_returns_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When Gemini returns '[]', function returns an empty list without error."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
-        with patch(
-            "backend.services.ai_service.genai.Client", _mock_gemini_text("[]")
-        ):
+        with patch("backend.services.ai_service.genai.Client", _mock_gemini_text("[]")):
             result = llm_filter_hardware("nothing matches", _SAMPLE_RECORDS)
 
         assert result == []
