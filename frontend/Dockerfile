@@ -14,9 +14,7 @@ COPY . .
 RUN npm run build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-# Serve the compiled assets with nginx.  At runtime, docker-entrypoint.sh renders
-# nginx.conf from nginx.conf.template so BACKEND_UPSTREAM can target Docker Compose
-# (backend:8000) or Railway private DNS (<service>.railway.internal:8000).
+# Runtime nginx: BACKEND_UPSTREAM is either host:port (Compose) or https://… (Railway public URL).
 FROM nginx:1.27-alpine AS runtime
 
 RUN apk add --no-cache gettext
@@ -24,10 +22,10 @@ RUN apk add --no-cache gettext
 RUN rm -f /etc/nginx/conf.d/default.conf
 
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY nginx.public.conf.template /etc/nginx/templates/nginx.public.conf.template
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# Docker Compose: default service hostname. Railway: set in the frontend service Variables.
 ENV BACKEND_UPSTREAM=backend:8000
 
 COPY --from=builder /app/dist /usr/share/nginx/html

@@ -16,9 +16,8 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
-    # Proxy all /api requests to the FastAPI backend.
-    # BACKEND_UPSTREAM is substituted at container start (default: backend:8000 for Docker Compose).
-    # On Railway set BACKEND_UPSTREAM=<your-backend-service>.railway.internal:<port>
+    # Proxy /api — BACKEND_UPSTREAM = host:port (default backend:8000). For Railway HTTPS use
+    # https://… in BACKEND_UPSTREAM instead (see nginx.public.conf.template path in entrypoint).
     location /api/ {
         set              $backend_upstream "${BACKEND_UPSTREAM}";
         proxy_pass       http://$backend_upstream/api/;
