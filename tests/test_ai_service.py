@@ -33,6 +33,7 @@ def _patch_gemini_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
     monkeypatch.setenv("GEMINI_MODEL", _TEST_GEMINI_MODEL)
 
+
 # ---------------------------------------------------------------------------
 # Minimal valid hardware dict (satisfies HardwareCreate without an id field)
 # ---------------------------------------------------------------------------
