@@ -278,9 +278,9 @@ def _utc_iso_z(value: datetime.datetime | None) -> str | None:
     if value is None:
         return None
     aware = (
-        value.replace(tzinfo=datetime.timezone.utc)
+        value.replace(tzinfo=datetime.UTC)
         if value.tzinfo is None
-        else value.astimezone(datetime.timezone.utc)
+        else value.astimezone(datetime.UTC)
     )
     return aware.isoformat().replace("+00:00", "Z")
 
@@ -305,7 +305,5 @@ class RentalRead(BaseModel):
     returned_at: datetime.datetime | None
 
     @field_serializer("rented_at", "returned_at", when_used="json")
-    def _serialize_rental_timestamps(
-        self, value: datetime.datetime | None
-    ) -> str | None:
+    def _serialize_rental_timestamps(self, value: datetime.datetime | None) -> str | None:
         return _utc_iso_z(value)

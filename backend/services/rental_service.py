@@ -97,9 +97,7 @@ def rent_hardware(db: Session, user_id: int, hardware_id: int) -> Rental:
     hardware.status = "In Use"
     # Naive UTC for SQLite DateTime (no tz column); API exposes Zulu ISO via RentalRead.
     rented_at = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-    rental: Rental = Rental(
-        user_id=user_id, hardware_id=hardware_id, rented_at=rented_at
-    )
+    rental: Rental = Rental(user_id=user_id, hardware_id=hardware_id, rented_at=rented_at)
     db.add(rental)
     db.commit()
     db.refresh(rental)
