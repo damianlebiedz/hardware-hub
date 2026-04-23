@@ -342,11 +342,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
-import { listHardware, rentHardware, aiSearch, createHardware, deleteHardware, updateHardware } from '../api/client.js'
+import { listHardware, rentHardware, createHardware, deleteHardware, updateHardware } from '../api/client.js'
 import { getStoredUser } from '../api/client.js'
 import { useDelayedTableLoading } from '../composables/useDelayedTableLoading.js'
+import { useDashboardAiSearch } from '../composables/useDashboardAiSearch.js'
 
-const AI_FILTER_SESSION_KEY = 'hardware_hub_dashboard_ai_filter'
 const AUTO_REFRESH_MS = 60_000
 
 let hardwareLoadInFlight = false
@@ -366,75 +366,31 @@ const showTableLoadingRow = useDelayedTableLoading(fetching, hardwareListEmpty)
 const searchQuery  = ref('')
 const statusFilter = ref('All')
 
-// AI list filter (must exist before persist / reapply helpers)
-const aiLoading       = ref(false)
-const aiResults       = ref(null)
-const lastAiQuery     = ref('')
-const aiSearchPrompt  = ref('')
-
-/** Read saved AI prompt synchronously so the first paint matches filter mode (no placeholder flicker). */
-function hydrateAiFilterMetadataFromSession() {
-  const raw = sessionStorage.getItem(AI_FILTER_SESSION_KEY)
-  if (!raw) return
-  try {
-    const { query, ids } = JSON.parse(raw)
-    if (typeof query !== 'string' || !query.trim() || !Array.isArray(ids)) {
-      sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-      return
-    }
-    lastAiQuery.value = query
-  } catch {
-    sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-  }
+// ── Toasts (needed before useDashboardAiSearch for run AI error path) ─────────
+const errorToast = ref('')
+let errorToastTimer = null
+function showErrorToast(msg) {
+  errorToast.value = msg
+  clearTimeout(errorToastTimer)
+  errorToastTimer = setTimeout(() => { errorToast.value = '' }, 10_000)
 }
-hydrateAiFilterMetadataFromSession()
-
-function clearAiResults() {
-  aiResults.value      = null
-  lastAiQuery.value    = ''
-  aiSearchPrompt.value = ''
-  searchQuery.value    = ''
-  sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
+function dismissErrorToast() {
+  errorToast.value = ''
+  clearTimeout(errorToastTimer)
 }
 
-function persistAiFilter() {
-  if (lastAiQuery.value && aiResults.value !== null) {
-    sessionStorage.setItem(
-      AI_FILTER_SESSION_KEY,
-      JSON.stringify({
-        query: lastAiQuery.value,
-        ids: aiResults.value.map((r) => r.id),
-      })
-    )
-  } else {
-    sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-  }
-}
-
-function reapplyAiFilterFromStorage() {
-  const raw = sessionStorage.getItem(AI_FILTER_SESSION_KEY)
-  if (!raw) return
-  try {
-    const { query, ids } = JSON.parse(raw)
-    if (!query || !Array.isArray(ids)) {
-      sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-      return
-    }
-    const byId = Object.fromEntries(allHardware.value.map((h) => [h.id, h]))
-    const rows = ids.map((id) => byId[id]).filter(Boolean)
-    if (rows.length === 0 && ids.length > 0) {
-      clearAiResults()
-      return
-    }
-    lastAiQuery.value = query
-    aiResults.value = rows
-    if (rows.length < ids.length) {
-      persistAiFilter()
-    }
-  } catch {
-    sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-  }
-}
+const {
+  aiLoading,
+  aiResults,
+  lastAiQuery,
+  aiSearchPrompt,
+  aiFilterUiActive,
+  searchPlaceholder,
+  clearAiResults,
+  persistAiFilter,
+  reapplyAiFilterFromStorage,
+  runAiSearch,
+} = useDashboardAiSearch({ allHardware, searchQuery, error, showErrorToast })
 
 async function loadHardware() {
   if (hardwareLoadInFlight) return
@@ -501,40 +457,6 @@ function applyStatusAndSearchFilter(rows) {
 
 const locallyFiltered = computed(() => applyStatusAndSearchFilter(allHardware.value))
 
-/** True while AI filter applies: has rows or still restoring prompt from session before rows hydrate. */
-const aiFilterUiActive = computed(
-  () => aiResults.value !== null || !!lastAiQuery.value
-)
-
-async function runAiSearch() {
-  const q = searchQuery.value.trim()
-  if (!q || aiResults.value !== null || lastAiQuery.value) return
-  aiSearchPrompt.value = q
-  aiLoading.value = true
-  error.value     = ''
-  try {
-    const results = await aiSearch(q)
-    aiResults.value   = results
-    lastAiQuery.value = q
-    searchQuery.value = ''
-    persistAiFilter()
-  } catch (err) {
-    showErrorToast(err.message || 'AI search failed.')
-  } finally {
-    aiLoading.value = false
-    if (aiResults.value === null) {
-      aiSearchPrompt.value = ''
-    }
-  }
-}
-
-// ── Search placeholder ────────────────────────────────────────────────────────
-const searchPlaceholder = computed(() =>
-  aiResults.value !== null || lastAiQuery.value
-    ? 'Filter within AI results (name, brand, status, date\u2026)'
-    : 'Filter by name, brand, status, date, or search with AI\u2026'
-)
-
 // ── Displayed rows ──────────────────────────────────────────────────────────
 const displayedRows = computed(() => {
   if (aiResults.value !== null) {
@@ -546,25 +468,13 @@ const displayedRows = computed(() => {
   return locallyFiltered.value
 })
 
-// ── Toast (fixed-position, no layout shift) ───────────────────────────────────
+// ── Toast (success / rent feedback) ─────────────────────────────────────────
 const toast = ref('')
 let toastTimer = null
 function showToast(msg) {
   toast.value = msg
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toast.value = '' }, 4000)
-}
-
-const errorToast = ref('')
-let errorToastTimer = null
-function showErrorToast(msg) {
-  errorToast.value = msg
-  clearTimeout(errorToastTimer)
-  errorToastTimer = setTimeout(() => { errorToast.value = '' }, 10_000)
-}
-function dismissErrorToast() {
-  errorToast.value = ''
-  clearTimeout(errorToastTimer)
 }
 
 // ── Rent ─────────────────────────────────────────────────────────────────────
