@@ -48,6 +48,6 @@ RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-# Launch Uvicorn pointing at the backend package.
+# Railway injects PORT; Docker Compose leaves it unset → 8000 matches EXPOSE and compose ports.
 # Override CMD in docker-compose for local development hot-reloading if desired.
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -144,14 +144,7 @@
           'hardware-list-body--refreshing': fetching && allHardware.length > 0,
         }"
       >
-        <template v-if="!(fetching && allHardware.length === 0)">
-      <div v-if="displayedRows.length === 0" class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-        </svg>
-        <p>No hardware items found.</p>
-      </div>
-      <div v-else class="table-wrap">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -161,6 +154,7 @@
                   type="checkbox"
                   class="row-checkbox"
                   :checked="allFilteredSelected"
+                  :disabled="displayedRows.length === 0"
                   @change="toggleAllDisplayed"
                 />
               </th>
@@ -256,10 +250,30 @@
                 </div>
               </td>
             </tr>
+            <tr
+              v-if="fetching && allHardware.length === 0 && showTableLoadingRow"
+              class="table-loading-row"
+            >
+              <td :colspan="isAdmin ? 7 : 5">
+                <div class="table-loading-cell" role="status" aria-live="polite">
+                  <span class="spinner table-loading-spinner" aria-hidden="true" />
+                  <p class="table-loading-label">Loading hardware…</p>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="displayedRows.length === 0 && !fetching" class="table-empty-message-row">
+              <td :colspan="isAdmin ? 7 : 5">
+                <div class="empty-state">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                  </svg>
+                  <p>No hardware items found.</p>
+                </div>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
-        </template>
       </div>
     </div>
 
@@ -318,14 +332,21 @@
       <button class="btn-icon" style="margin-left:.5rem;" @click="toast = ''">×</button>
     </div>
   </Transition>
+  <Transition name="toast">
+    <div v-if="errorToast" class="action-toast action-toast--error" role="alert">
+      <span>{{ errorToast }}</span>
+      <button class="btn-icon" style="margin-left:.5rem; flex-shrink:0;" @click="dismissErrorToast">×</button>
+    </div>
+  </Transition>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
-import { listHardware, rentHardware, aiSearch, createHardware, deleteHardware, updateHardware } from '../api/client.js'
+import { listHardware, rentHardware, createHardware, deleteHardware, updateHardware } from '../api/client.js'
 import { getStoredUser } from '../api/client.js'
+import { useDelayedTableLoading } from '../composables/useDelayedTableLoading.js'
+import { useDashboardAiSearch } from '../composables/useDashboardAiSearch.js'
 
-const AI_FILTER_SESSION_KEY = 'hardware_hub_dashboard_ai_filter'
 const AUTO_REFRESH_MS = 60_000
 
 let hardwareLoadInFlight = false
@@ -339,78 +360,37 @@ const allHardware = ref([])
 const fetching    = ref(true)
 const error       = ref('')
 
+const hardwareListEmpty = computed(() => allHardware.value.length === 0)
+const showTableLoadingRow = useDelayedTableLoading(fetching, hardwareListEmpty)
+
 const searchQuery  = ref('')
 const statusFilter = ref('All')
 
-// AI list filter (must exist before persist / reapply helpers)
-const aiLoading       = ref(false)
-const aiResults       = ref(null)
-const lastAiQuery     = ref('')
-const aiSearchPrompt  = ref('')
-
-/** Read saved AI prompt synchronously so the first paint matches filter mode (no placeholder flicker). */
-function hydrateAiFilterMetadataFromSession() {
-  const raw = sessionStorage.getItem(AI_FILTER_SESSION_KEY)
-  if (!raw) return
-  try {
-    const { query, ids } = JSON.parse(raw)
-    if (typeof query !== 'string' || !query.trim() || !Array.isArray(ids)) {
-      sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-      return
-    }
-    lastAiQuery.value = query
-  } catch {
-    sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-  }
+// ── Toasts (needed before useDashboardAiSearch for run AI error path) ─────────
+const errorToast = ref('')
+let errorToastTimer = null
+function showErrorToast(msg) {
+  errorToast.value = msg
+  clearTimeout(errorToastTimer)
+  errorToastTimer = setTimeout(() => { errorToast.value = '' }, 10_000)
 }
-hydrateAiFilterMetadataFromSession()
-
-function clearAiResults() {
-  aiResults.value      = null
-  lastAiQuery.value    = ''
-  aiSearchPrompt.value = ''
-  searchQuery.value    = ''
-  sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
+function dismissErrorToast() {
+  errorToast.value = ''
+  clearTimeout(errorToastTimer)
 }
 
-function persistAiFilter() {
-  if (lastAiQuery.value && aiResults.value !== null) {
-    sessionStorage.setItem(
-      AI_FILTER_SESSION_KEY,
-      JSON.stringify({
-        query: lastAiQuery.value,
-        ids: aiResults.value.map((r) => r.id),
-      })
-    )
-  } else {
-    sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-  }
-}
-
-function reapplyAiFilterFromStorage() {
-  const raw = sessionStorage.getItem(AI_FILTER_SESSION_KEY)
-  if (!raw) return
-  try {
-    const { query, ids } = JSON.parse(raw)
-    if (!query || !Array.isArray(ids)) {
-      sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-      return
-    }
-    const byId = Object.fromEntries(allHardware.value.map((h) => [h.id, h]))
-    const rows = ids.map((id) => byId[id]).filter(Boolean)
-    if (rows.length === 0 && ids.length > 0) {
-      clearAiResults()
-      return
-    }
-    lastAiQuery.value = query
-    aiResults.value = rows
-    if (rows.length < ids.length) {
-      persistAiFilter()
-    }
-  } catch {
-    sessionStorage.removeItem(AI_FILTER_SESSION_KEY)
-  }
-}
+const {
+  aiLoading,
+  aiResults,
+  lastAiQuery,
+  aiSearchPrompt,
+  aiFilterUiActive,
+  searchPlaceholder,
+  clearAiResults,
+  persistAiFilter,
+  reapplyAiFilterFromStorage,
+  runAiSearch,
+} = useDashboardAiSearch({ allHardware, searchQuery, error, showErrorToast })
 
 async function loadHardware() {
   if (hardwareLoadInFlight) return
@@ -477,40 +457,6 @@ function applyStatusAndSearchFilter(rows) {
 
 const locallyFiltered = computed(() => applyStatusAndSearchFilter(allHardware.value))
 
-/** True while AI filter applies: has rows or still restoring prompt from session before rows hydrate. */
-const aiFilterUiActive = computed(
-  () => aiResults.value !== null || !!lastAiQuery.value
-)
-
-async function runAiSearch() {
-  const q = searchQuery.value.trim()
-  if (!q || aiResults.value !== null || lastAiQuery.value) return
-  aiSearchPrompt.value = q
-  aiLoading.value = true
-  error.value     = ''
-  try {
-    const results = await aiSearch(q)
-    aiResults.value   = results
-    lastAiQuery.value = q
-    searchQuery.value = ''
-    persistAiFilter()
-  } catch (err) {
-    error.value = err.message || 'AI search failed.'
-  } finally {
-    aiLoading.value = false
-    if (aiResults.value === null) {
-      aiSearchPrompt.value = ''
-    }
-  }
-}
-
-// ── Search placeholder ────────────────────────────────────────────────────────
-const searchPlaceholder = computed(() =>
-  aiResults.value !== null || lastAiQuery.value
-    ? 'Filter within AI results (name, brand, status, date\u2026)'
-    : 'Filter by name, brand, status, date, or search with AI\u2026'
-)
-
 // ── Displayed rows ──────────────────────────────────────────────────────────
 const displayedRows = computed(() => {
   if (aiResults.value !== null) {
@@ -522,7 +468,7 @@ const displayedRows = computed(() => {
   return locallyFiltered.value
 })
 
-// ── Toast (fixed-position, no layout shift) ───────────────────────────────────
+// ── Toast (success / rent feedback) ─────────────────────────────────────────
 const toast = ref('')
 let toastTimer = null
 function showToast(msg) {
@@ -1180,7 +1126,15 @@ function statusClass(status) {
 
 /* ── AI loading state ─────────────────────────────────────────────────── */
 .hardware-list-body--pending {
-  min-height: 10rem;
+  min-height: 0;
+}
+
+.table-empty-message-row td {
+  padding: 0;
+  vertical-align: middle;
+}
+.table-empty-message-row .empty-state {
+  padding: 3rem 1.5rem;
 }
 .hardware-list-body--refreshing {
   opacity: 0.92;
@@ -1195,6 +1149,9 @@ function statusClass(status) {
   padding: 4rem 2rem;
   gap: .75rem;
   text-align: center;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 .ai-loading-spinner {
   width: 36px !important;
@@ -1224,6 +1181,13 @@ function statusClass(status) {
   font-size: .85rem;
   box-shadow: var(--shadow-md);
   max-width: 360px;
+}
+.action-toast--error {
+  z-index: 450;
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #7f1d1d;
+  box-shadow: 0 8px 24px rgba(127, 29, 29, 0.12);
 }
 .toast-enter-active, .toast-leave-active { transition: opacity .2s, transform .2s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
