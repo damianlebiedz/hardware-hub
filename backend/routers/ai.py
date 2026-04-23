@@ -106,9 +106,22 @@ def preview_seed(
                     next_id += 1
                 proposed_id = next_id
                 next_id += 1
+                in_db = raw_id in existing_ids
+                in_batch = raw_id in batch_ids
+                if in_db and in_batch:
+                    id_reason = "This ID is already in the database and repeats in this import."
+                elif in_db:
+                    id_reason = "This ID is already used in the database."
+                else:
+                    id_reason = "Another record in this import already uses this ID."
                 # Surface the reassignment as a visible correction.
                 field_changes = [
-                    SeedFieldChange(field="id", before=str(raw_id), after=str(proposed_id))
+                    SeedFieldChange(
+                        field="id",
+                        before=str(raw_id),
+                        after=str(proposed_id),
+                        reason=id_reason,
+                    )
                 ] + field_changes
 
         if proposed_id is not None:

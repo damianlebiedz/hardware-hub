@@ -3,10 +3,10 @@
     <h1>Admin Panel</h1>
     <p class="text-muted mt-1">Manage users and import legacy hardware data.</p>
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-top:1.5rem;">
+    <div class="admin-dashboard-grid">
 
       <!-- ── Add User ────────────────────────────────────────────────────────── -->
-      <div class="card">
+      <div class="card admin-dashboard-card">
         <h2>Add User</h2>
         <p class="text-muted mt-1" style="margin-bottom:1rem;">
           Create a new account with a password. Passwords are hashed server-side.
@@ -32,7 +32,7 @@
       </div>
 
       <!-- ── Seed Importer ───────────────────────────────────────────────────── -->
-      <div class="card seed-card" :class="{ 'seed-card-ai': aiMode }">
+      <div class="card seed-card admin-dashboard-card" :class="{ 'seed-card-ai': aiMode }">
 
         <!-- Header -->
         <div class="seed-header">
@@ -65,7 +65,14 @@
             <button class="btn btn-primary btn-sm" @click="showReviewOverlay = true">
               Show proposals →
             </button>
-            <button class="btn btn-ghost btn-sm" @click="resetProposals" title="Discard proposals">✕ Discard</button>
+            <button
+              class="btn btn-sm btn-danger-outline"
+              type="button"
+              title="Discard proposals"
+              @click="resetProposals"
+            >
+              ✕ Discard
+            </button>
           </div>
         </div>
 
@@ -93,17 +100,11 @@
             <button
               v-if="seedFileName"
               class="btn-icon file-picker-clear"
-              title="Remove file"
-              @click="clearFile"
+              type="button"
+              title="Remove file and import result"
+              @click.stop="clearPickedFile"
             >✕</button>
           </div>
-        </div>
-
-        <!-- Ready info -->
-        <div v-if="seedRecordCount > 0 && !(aiMode && hasProposals)"
-             class="alert alert-info" style="margin-bottom:.75rem; font-size:.82rem;">
-          <strong>{{ seedRecordCount }} record{{ seedRecordCount !== 1 ? 's' : '' }}</strong>
-          from <strong>{{ seedFileName }}</strong> ready.
         </div>
 
         <div v-if="seedError" class="alert alert-error" style="margin-bottom:.75rem;">{{ seedError }}</div>
@@ -115,6 +116,7 @@
             v-if="aiMode"
             class="btn btn-ai"
             style="height:2.25rem; justify-content:center;"
+            :class="{ 'btn--pending': seedStep === 'previewing' }"
             :disabled="seedStep === 'previewing' || seedRecordCount === 0 || hasProposals"
             :title="hasProposals ? 'Review or discard current proposals first' : ''"
             @click="handlePreview"
@@ -128,41 +130,50 @@
             v-else
             class="btn btn-primary"
             style="height:2.25rem; justify-content:center;"
+            :class="{ 'btn--pending': seedStep === 'importing' }"
             :disabled="seedStep === 'importing' || seedRecordCount === 0"
+            :aria-busy="seedStep === 'importing'"
             @click="handlePlainImport"
           >
-            <span v-if="seedStep === 'importing'" class="spinner"></span>
-            {{ seedStep === 'importing' ? 'Importing…' : 'Import' }}
+            Import
           </button>
 
           <button
-            v-if="seedRecordCount > 0 && !plainSeedResult"
+            v-if="seedRecordCount > 0"
             class="btn btn-ghost btn-sm"
-            style="font-size:.78rem; opacity:.8;"
+            style="opacity:.8;"
             @click="showRawModal = true"
           >
             Show raw data
           </button>
         </div>
 
-        <!-- Non-AI mode: rejected records banner -->
-        <div v-if="!aiMode && plainSeedResult" class="proposals-banner proposals-banner-plain">
-          <div class="proposals-banner-info">
-            <strong>{{ plainSeedResult.inserted }}</strong> inserted
-            <span v-if="plainSeedResult.rejected.length">
-              · <strong>{{ plainSeedResult.rejected.length }}</strong> skipped
-            </span>
-            <span class="text-muted" style="font-size:.78rem;">· last import result</span>
-          </div>
-          <div style="display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;">
-            <button
-              v-if="plainSeedResult.rejected.length"
-              class="btn btn-ghost btn-sm"
-              @click="showRejectedOverlay = true"
-            >
-              Show skipped →
-            </button>
-            <button class="btn-icon" title="Dismiss" @click="dismissPlainResult">✕</button>
+        <!-- Non-AI: fixed slot so card height does not jump when skipped banner appears -->
+        <div v-if="!aiMode" class="plain-import-banner-reserved">
+          <div
+            v-if="plainSeedResult && plainSeedResult.rejected.length"
+            class="proposals-banner proposals-banner-plain"
+          >
+            <div class="proposals-banner-info">
+              <p class="plain-import-skip-line">
+                <strong>{{ plainSeedResult.rejected.length }}</strong> skipped during the last import
+              </p>
+            </div>
+            <div style="display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;">
+              <button
+                class="btn btn-sm btn-danger-outline"
+                type="button"
+                @click="showRejectedOverlay = true"
+              >
+                Show skipped →
+              </button>
+              <button
+                class="btn-icon"
+                type="button"
+                title="Dismiss import result (keeps the selected file)"
+                @click="dismissPlainImportBanner"
+              >✕</button>
+            </div>
           </div>
         </div>
 
@@ -235,11 +246,16 @@
 
                 <div v-if="rec.changes.length" class="review-diffs">
                   <div class="review-diffs-label">AI corrections:</div>
-                  <div v-for="ch in rec.changes" :key="ch.field" class="diff-row">
+                  <div
+                    v-for="(ch, chIdx) in rec.changes"
+                    :key="`${rec.index}-${chIdx}-${ch.field}`"
+                    class="diff-row"
+                  >
                     <span class="diff-field">{{ fieldLabel(ch.field) }}</span>
                     <span class="diff-before">{{ ch.before ?? '—' }}</span>
                     <span class="diff-arrow">→</span>
                     <span class="diff-after">{{ ch.after ?? '—' }}</span>
+                    <span v-if="ch.reason" class="diff-reason">{{ ch.reason }}</span>
                   </div>
                 </div>
               </div>
@@ -247,11 +263,12 @@
           </div>
 
           <div class="overlay-footer">
-            <button class="btn btn-ghost btn-sm" style="color:#dc2626;" @click="resetProposals">
-              ✕ Discard all proposals
+            <button class="btn btn-sm btn-danger-outline" type="button" @click="resetProposals">
+              Discard all proposals
             </button>
             <button
               class="btn btn-primary"
+              :class="{ 'btn--pending': seedStep === 'importing' }"
               :disabled="accepted.size === 0 || seedStep === 'importing'"
               @click="handleConfirmImport"
             >
@@ -296,8 +313,8 @@
           </div>
 
           <div class="overlay-footer">
-            <button class="btn btn-ghost btn-sm" style="color:#dc2626;" @click="dismissPlainResult">
-              ✕ Dismiss results
+            <button class="btn btn-sm btn-danger-outline" type="button" @click="clearPickedFile">
+              Dismiss all
             </button>
             <button class="btn btn-ghost btn-sm" @click="showRejectedOverlay = false">
               Close
@@ -333,7 +350,6 @@
       <div class="toast-body">{{ toastMessage }}</div>
       <div class="toast-actions">
         <button class="btn btn-primary btn-sm" @click="goToDashboard">View in Dashboard →</button>
-        <button class="btn btn-ghost btn-sm" @click="dismissToast">Dismiss</button>
       </div>
     </div>
   </Transition>
@@ -398,6 +414,7 @@ const showRejectedOverlay = ref(false)
 // ── Session persistence ───────────────────────────────────────────────────────
 function saveSession() {
   if (previewResult.value) {
+    sessionStorage.removeItem(REJECTED_SESSION_KEY)
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({
       result: previewResult.value,
       acceptedIndices: [...accepted],
@@ -406,6 +423,32 @@ function saveSession() {
     }))
   } else {
     sessionStorage.removeItem(SESSION_KEY)
+  }
+}
+
+function restorePlainImportFromSession() {
+  const savedPlain = sessionStorage.getItem(REJECTED_SESSION_KEY)
+  if (!savedPlain) return
+  try {
+    const data = JSON.parse(savedPlain)
+    if (
+      data &&
+      typeof data === 'object' &&
+      data.result &&
+      Array.isArray(data.rawPayload)
+    ) {
+      plainSeedResult.value = data.result
+      seedPayload.value = data.rawPayload
+      seedRecordCount.value = data.rawPayload.length
+      seedFileName.value = data.rawFileName ?? ''
+      return
+    }
+    // Legacy: only API result was stored — cannot restore file; drop stale banner.
+    if (data && typeof data.inserted === 'number' && Array.isArray(data.rejected)) {
+      sessionStorage.removeItem(REJECTED_SESSION_KEY)
+    }
+  } catch {
+    sessionStorage.removeItem(REJECTED_SESSION_KEY)
   }
 }
 
@@ -428,29 +471,30 @@ onMounted(() => {
     }
   }
 
-  // Restore plain seed result
-  const savedPlain = sessionStorage.getItem(REJECTED_SESSION_KEY)
-  if (savedPlain) {
-    try {
-      plainSeedResult.value = JSON.parse(savedPlain)
-    } catch {
-      sessionStorage.removeItem(REJECTED_SESSION_KEY)
-    }
-  }
+  restorePlainImportFromSession()
 })
 
 function onAiModeChange() {
   seedError.value = ''
 }
 
-function dismissPlainResult() {
+function resetPlainImportResult() {
   plainSeedResult.value     = null
   showRejectedOverlay.value = false
   sessionStorage.removeItem(REJECTED_SESSION_KEY)
-  // File is intentionally NOT cleared here — user clears it via the ✕ on the picker.
 }
 
-// ── File handling ─────────────────────────────────────────────────────────────
+// Dismiss the yellow result bar; keeps the selected JSON (clearPickedFile also removes the file).
+function dismissPlainImportBanner() {
+  resetPlainImportResult()
+}
+
+// Clears the picked file and any non-AI "last import" (inserted / skipped) state.
+function clearPickedFile() {
+  clearFile()
+  resetPlainImportResult()
+}
+
 function clearFile() {
   seedPayload.value     = []
   seedRecordCount.value = 0
@@ -463,8 +507,7 @@ function clearFile() {
 async function handleFileChange(event) {
   const file = event.target.files?.[0]   // capture before clearFile resets the input
   clearFile()
-  plainSeedResult.value = null           // new file → clear old result
-  sessionStorage.removeItem(REJECTED_SESSION_KEY)
+  resetPlainImportResult()               // new file → clear last import (skipped) banner
   if (!file) return
   try {
     const parsed = JSON.parse(await file.text())
@@ -529,6 +572,7 @@ async function handleConfirmImport() {
         : `Inserted ${result.inserted} record(s). All records were already clean.`
     )
     showReviewOverlay.value = false
+    resetPlainImportResult()
     resetProposals()
     clearFile()
   } catch (err) {
@@ -545,15 +589,33 @@ async function handlePlainImport() {
   seedStep.value = 'importing'
   try {
     const result = await plainSeed(seedPayload.value)
-    plainSeedResult.value = result
-    sessionStorage.setItem(REJECTED_SESSION_KEY, JSON.stringify(result))
+    // Successful plain import: AI preview / proposals are always stale now.
+    resetProposals()
     if (!result.rejected.length) {
-      // All records inserted — clear file to prevent re-import
+      resetPlainImportResult()
       clearFile()
-      showImportToast(`Inserted ${result.inserted} record(s) successfully.`)
+      if (result.inserted > 0) {
+        showImportToast(`Inserted ${result.inserted} record(s) successfully.`)
+      }
+    } else {
+      sessionStorage.removeItem(SESSION_KEY)
+      plainSeedResult.value = result
+      sessionStorage.setItem(
+        REJECTED_SESSION_KEY,
+        JSON.stringify({
+          result,
+          rawPayload: seedPayload.value,
+          rawFileName: seedFileName.value,
+        })
+      )
+      if (result.inserted > 0) {
+        showImportToast(
+          `Inserted ${result.inserted} record(s). ${result.rejected.length} skipped during import.`
+        )
+      }
     }
-    // If there were skipped records, keep the file in the picker so the user
-    // can see which file produced the errors. File clears on dismiss or new file.
+    // If there were skipped records, keep the file until the user dismisses
+    // (or removes the file) via clearPickedFile, or picks a new file.
   } catch (err) {
     seedError.value = err.message || 'Import failed.'
   } finally {
@@ -582,7 +644,8 @@ function formatRejectionReason(reason) {
     const msg   = lines[2].replace(/\s*\[.*\]$/, '').trim()
     return `${field}: ${msg}`
   }
-  return lines[0].replace(/^.*?:\s*/, '').trim()
+  if (lines.length > 1) return lines.join('\n')
+  return lines[0] ?? ''
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -601,6 +664,32 @@ function goToDashboard() { dismissToast(); router.push('/dashboard') }
 </script>
 
 <style scoped>
+.admin-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  align-items: stretch;
+}
+
+.admin-dashboard-card {
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* Non-AI: reserve vertical space for the skipped banner (same height as when visible). */
+.plain-import-banner-reserved {
+  min-height: 4.5rem;
+  margin-bottom: 0.75rem;
+  flex-shrink: 0;
+}
+.plain-import-banner-reserved .proposals-banner {
+  margin-bottom: 0;
+}
+
 /* ── Seed card ────────────────────────────────────────────────────────────── */
 .seed-card {
   display: flex;
@@ -681,7 +770,6 @@ function goToDashboard() { dismissToast(); router.push('/dashboard') }
 .file-picker-clear {
   flex-shrink: 0;
   color: var(--text-muted);
-  font-size: .8rem;
 }
 .file-picker-clear:hover { color: #dc2626; }
 
@@ -700,8 +788,14 @@ function goToDashboard() { dismissToast(); router.push('/dashboard') }
   font-size: .82rem;
 }
 .proposals-banner-plain {
-  background: rgba(234, 179, 8, .06);
-  border-color: rgba(234, 179, 8, .35);
+  background: rgba(220, 38, 38, .06);
+  border-color: rgba(220, 38, 38, .28);
+  color: #991b1b;
+}
+.plain-import-skip-line {
+  margin: 0;
+  font-size: .84rem;
+  line-height: 1.4;
 }
 .proposals-banner-info {
   display: flex;
@@ -729,6 +823,8 @@ function goToDashboard() { dismissToast(); router.push('/dashboard') }
   font-size: .78rem;
   color: #dc2626;
   font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ── Non-AI result ────────────────────────────────────────────────────────── */
@@ -802,7 +898,7 @@ function goToDashboard() { dismissToast(); router.push('/dashboard') }
 }
 .overlay-title    { font-size: 1rem; font-weight: 700; margin-right: .5rem; }
 .overlay-subtitle { font-size: .8rem; color: var(--text-muted); }
-.overlay-close    { font-size: 1rem; color: var(--text-muted); flex-shrink: 0; }
+.overlay-close    { font-size: .875rem; color: var(--text-muted); flex-shrink: 0; }
 .overlay-toolbar {
   display: flex;
   align-items: center;
@@ -823,6 +919,16 @@ function goToDashboard() { dismissToast(); router.push('/dashboard') }
   background: var(--bg);
   flex-shrink: 0;
   gap: .5rem;
+}
+
+.btn.btn-danger-outline {
+  color: #dc2626;
+  border: 1px solid #dc2626;
+  background: transparent;
+  font-weight: 600;
+}
+.btn.btn-danger-outline:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.08);
 }
 
 /* ── Review items ─────────────────────────────────────────────────────────── */
@@ -881,11 +987,25 @@ function goToDashboard() { dismissToast(); router.push('/dashboard') }
   font-size: .7rem; font-weight: 600;
   text-transform: uppercase; letter-spacing: .02em; color: var(--text-muted); margin-bottom: .1rem;
 }
-.diff-row { display: flex; align-items: baseline; gap: .35rem; font-size: .78rem; }
+.diff-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .35rem;
+  font-size: .78rem;
+}
 .diff-field  { font-weight: 600; color: var(--text-muted); min-width: 46px; flex-shrink: 0; }
 .diff-before { color: #dc2626; text-decoration: line-through; opacity: .8; }
 .diff-arrow  { color: var(--text-muted); flex-shrink: 0; }
 .diff-after  { color: #16a34a; font-weight: 500; }
+.diff-reason {
+  flex: 1 1 100%;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+  font-style: italic;
+  padding-left: calc(46px + 0.35rem);
+}
 
 /* ── Alert warning ────────────────────────────────────────────────────────── */
 .alert-warning {

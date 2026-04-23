@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_serializer
 
 # ── User ──────────────────────────────────────────────────────────────────────
 
@@ -142,11 +142,13 @@ class SeedFieldChange(BaseModel):
         field: Name of the field that was changed.
         before: Raw value before AI correction (as a string, or None).
         after: Cleaned value after AI correction (as a string, or None).
+        reason: Optional short note (e.g. why an ``id`` was reassigned in preview).
     """
 
     field: str
     before: str | None
     after: str | None
+    reason: str | None = None
 
 
 class SeedRecordChange(BaseModel):
@@ -271,6 +273,18 @@ class ReturnRequest(BaseModel):
     rental_id: int
 
 
+def _utc_iso_z(value: datetime.datetime | None) -> str | None:
+    """Serialise DB datetimes (naive UTC) to RFC 3339 with ``Z`` for unambiguous JSON."""
+    if value is None:
+        return None
+    aware = (
+        value.replace(tzinfo=datetime.timezone.utc)
+        if value.tzinfo is None
+        else value.astimezone(datetime.timezone.utc)
+    )
+    return aware.isoformat().replace("+00:00", "Z")
+
+
 class RentalRead(BaseModel):
     """Full rental record representation returned by the API.
 
@@ -289,3 +303,9 @@ class RentalRead(BaseModel):
     hardware_id: int
     rented_at: datetime.datetime
     returned_at: datetime.datetime | None
+
+    @field_serializer("rented_at", "returned_at", when_used="json")
+    def _serialize_rental_timestamps(
+        self, value: datetime.datetime | None
+    ) -> str | None:
+        return _utc_iso_z(value)

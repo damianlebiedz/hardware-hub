@@ -5,23 +5,30 @@
         <h1>My Rentals</h1>
         <p class="text-muted mt-1">Items you currently have checked out.</p>
       </div>
-      <button class="btn btn-ghost btn-sm" @click="loadRentals">↻ Refresh</button>
     </div>
 
     <div v-if="error" class="alert alert-error mt-2">{{ error }}</div>
 
-    <div class="mt-2">
-      <div v-if="loading" style="text-align:center; padding:3rem;">
-        <span class="spinner"></span>
-      </div>
-      <div v-else-if="rentals.length === 0" class="empty-state card">
+    <div
+      class="mt-2 rentals-body"
+      :class="{
+        'rentals-body--pending': fetching && rentals.length === 0,
+        'rentals-body--refreshing': fetching && rentals.length > 0,
+      }"
+    >
+      <template v-if="!(fetching && rentals.length === 0)">
+      <div v-if="rentals.length === 0" class="empty-state card">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/>
           <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/>
         </svg>
         <p>You have no active rentals.</p>
-        <RouterLink to="/dashboard" class="btn btn-ghost btn-sm" style="margin-top:.75rem;">
-          Browse hardware →
+        <RouterLink
+          to="/dashboard"
+          class="btn btn-ghost btn-sm browse-hardware-link"
+          style="margin-top:.75rem;"
+        >
+          Browse hardware
         </RouterLink>
       </div>
       <div v-else class="table-wrap">
@@ -41,10 +48,10 @@
               </td>
               <td>{{ rental.hardware_brand || '—' }}</td>
               <td class="text-muted">{{ formatDate(rental.rented_at) }}</td>
-              <td>
+              <td style="text-align: center;">
                 <button
-                  class="btn btn-sm btn-danger"
-                  style="width:100%; justify-content:center;"
+                  type="button"
+                  class="btn btn-sm btn-danger btn-return-narrow"
                   :disabled="returningId === rental.id"
                   @click="handleReturn(rental)"
                 >
@@ -55,31 +62,36 @@
           </tbody>
         </table>
       </div>
+      </template>
     </div>
   </div>
 
   <Transition name="toast">
     <div v-if="toast" class="action-toast" role="alert">
       <span>{{ toast }}</span>
-      <button style="margin-left:.5rem; background:none; border:none; color:inherit; cursor:pointer; font-size:1rem; line-height:1;" @click="toast = ''">×</button>
+      <button style="margin-left:.5rem; background:none; border:none; color:inherit; cursor:pointer; font-size:.875rem; line-height:1;" @click="toast = ''">×</button>
     </div>
   </Transition>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { myRentals, returnHardware, listHardware } from '../api/client.js'
 import { getStoredUser } from '../api/client.js'
 
 const user = getStoredUser()
 
+const AUTO_REFRESH_MS = 60_000
+let rentalsRefreshTimer = null
+
 const rentals     = ref([])
-const loading     = ref(false)
+const fetching    = ref(false)
 const error       = ref('')
 const returningId = ref(null)
 const toast       = ref('')
 let toastTimer    = null
+
 function showToast(msg) {
   toast.value = msg
   clearTimeout(toastTimer)
@@ -88,8 +100,9 @@ function showToast(msg) {
 
 async function loadRentals() {
   if (!user) return
-  loading.value = true
-  error.value   = ''
+  if (fetching.value) return
+  error.value = ''
+  fetching.value = true
   try {
     const [rentalList, hardwareList] = await Promise.all([
       myRentals(user.id),
@@ -105,11 +118,27 @@ async function loadRentals() {
   } catch (err) {
     error.value = err.message || 'Failed to load rentals.'
   } finally {
-    loading.value = false
+    fetching.value = false
   }
 }
 
-onMounted(loadRentals)
+function onRentalsVisibilityChange() {
+  if (document.visibilityState === 'visible') loadRentals()
+}
+
+onMounted(() => {
+  loadRentals()
+  rentalsRefreshTimer = window.setInterval(loadRentals, AUTO_REFRESH_MS)
+  document.addEventListener('visibilitychange', onRentalsVisibilityChange)
+})
+
+onUnmounted(() => {
+  if (rentalsRefreshTimer !== null) {
+    window.clearInterval(rentalsRefreshTimer)
+    rentalsRefreshTimer = null
+  }
+  document.removeEventListener('visibilitychange', onRentalsVisibilityChange)
+})
 
 async function handleReturn(rental) {
   returningId.value = rental.id
@@ -140,6 +169,22 @@ function formatDate(iso) {
 </script>
 
 <style scoped>
+.browse-hardware-link {
+  text-decoration: none;
+}
+.browse-hardware-link:hover,
+.browse-hardware-link:focus-visible {
+  text-decoration: none;
+}
+
+.rentals-body--pending {
+  min-height: 10rem;
+}
+.rentals-body--refreshing {
+  opacity: 0.92;
+  transition: opacity 0.12s ease-out;
+}
+
 .action-toast {
   position: fixed;
   bottom: 1.5rem;
@@ -147,12 +192,13 @@ function formatDate(iso) {
   z-index: 400;
   display: flex;
   align-items: center;
-  background: #166534;
-  color: #fff;
+  background: var(--white, #fff);
+  color: var(--text);
+  border: 1px solid var(--border);
   padding: .6rem 1rem;
   border-radius: var(--radius, 8px);
   font-size: .85rem;
-  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  box-shadow: var(--shadow-md, 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06));
   max-width: 360px;
 }
 .toast-enter-active, .toast-leave-active { transition: opacity .2s, transform .2s; }

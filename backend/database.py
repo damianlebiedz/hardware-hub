@@ -1,21 +1,28 @@
 """Database engine, session factory, and declarative base for Hardware Hub.
 
-The production SQLite database file is stored at ``/app/data/hardware.db``,
-which is mapped to the named Docker volume defined in ``docker-compose.yml``.
-The ``DATABASE_URL`` environment variable can override this path, which is
-exploited by the test suite to substitute an in-memory SQLite database.
+If ``DATABASE_URL`` is unset, SQLite uses ``<project_root>/data/hardware.db``,
+where the project root is the parent of the ``backend`` package.  That is
+``data/hardware.db`` next to your checkout locally and ``/app/data/hardware.db``
+in the Docker image (volume in ``docker-compose.yml``).  Set ``DATABASE_URL`` in
+``.env`` to override (e.g. ``sqlite:///:memory:`` for tests).
 """
 
 import os
 from collections.abc import Generator
+from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL",
-    "sqlite:////app/data/hardware.db",
-)
+
+def _default_sqlite_database_url() -> str:
+    project_root = Path(__file__).resolve().parent.parent
+    db_path = project_root / "data" / "hardware.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{db_path.as_posix()}"
+
+
+DATABASE_URL: str = os.getenv("DATABASE_URL") or _default_sqlite_database_url()
 
 # ``check_same_thread=False`` is required for SQLite when the same connection
 # may be accessed from multiple threads (e.g. FastAPI's async request handling).

@@ -2,6 +2,8 @@
 
 Hardware Hub is an internal MVP application designed to manage, rent, and maintain company equipment. It leverages an AI-Native architecture to handle data migration and natural language search.
 
+The project was also meant to demonstrate practical use of that AI-native approach, applying AI-assisted development to move from idea to a working MVP quickly.
+
 ## Tech Stack
 * **Backend:** Python (FastAPI, SQLAlchemy)
 * **Dependency Management:** Poetry
@@ -27,6 +29,16 @@ Hardware Hub is an internal MVP application designed to manage, rent, and mainta
 
 Use this mode for fastest development feedback (hot reload on frontend).
 
+#### How configuration and SQLite work
+
+| Mechanism | Behaviour |
+|-----------|-----------|
+| **`.env` in the project root** | When anything imports the `backend` package (for example `uvicorn backend.main:app`), `backend/__init__.py` runs `python-dotenv` and loads `.env`. **Existing OS environment variables are left unchanged** ,  values you export in the shell or that Docker injects still win. |
+| **`DATABASE_URL`** | If unset, the app uses **`<project_root>/data/hardware.db`**: the directory `data/` is created if missing (`backend/database.py`). This is the same relative layout as in the container (`/app/data/hardware.db` when the app lives under `/app`). Set `DATABASE_URL` in `.env` only when you need a different path (or `sqlite:///:memory:` for experiments). |
+| **API + UI** | The backend listens on port **8000**. The Vite dev server (port **5173**) proxies **`/api`** to `http://localhost:8000` (`frontend/vite.config.js`). You open the UI at **5173**; requests to `/api` reach FastAPI automatically. |
+
+**Docker vs local:** With `docker compose`, Compose reads `.env` and passes those values into the container environment. Locally, the file is read by the app via dotenv as above. The SQLite file in Docker is stored in the named volume mounted at `/app/data`; locally it is the file under your checkout at `data/hardware.db` (unless you override `DATABASE_URL`).
+
 #### 1) Clone and enter the project
 
 ```bash
@@ -42,7 +54,9 @@ poetry install --with dev
 
 #### 3) Configure environment variables
 
-Set `GEMINI_API_KEY` in your shell before starting the backend.
+Copy `.env.example` to `.env` in the project root and edit values there (see the table above for how loading works).
+
+You can still set variables in the shell instead of or in addition to `.env` (shell wins over `.env` for the same key).
 
 PowerShell:
 
@@ -56,11 +70,13 @@ bash/zsh:
 export GEMINI_API_KEY="your_api_key_here"
 ```
 
-Optional:
-- `GEMINI_MODEL` (default: `gemini-2.5-flash`)
-- `DATABASE_URL` (default: `sqlite:////app/data/hardware.db`)
+Optional in `.env` or the shell:
+
+- `GEMINI_MODEL` ,  see `.env.example` for the suggested value.
+- `DATABASE_URL` — only if you do not want the default `data/hardware.db` next to the project root.
 
 **Bootstrap admin** (see [Admin Bootstrap](#admin-bootstrap) below):
+
 - `BOOTSTRAP_ADMIN_ENABLED` (default: `true`)
 - `BOOTSTRAP_ADMIN_EMAIL` (required when enabled)
 - `BOOTSTRAP_ADMIN_PASSWORD` (required when enabled, min 8 chars)
@@ -94,9 +110,11 @@ npm run dev
 
 Use this mode for environment parity and one-command startup.
 
+`docker-compose.yml` sets `env_file: .env` on the backend service, so the same root `.env` file is injected into the container as real environment variables. The backend still calls `load_dotenv` on import, but **does not override** those values. SQLite is persisted in the named volume `hardware-hub-sqlite-data` mounted at `/app/data`, which matches the default `DATABASE_URL` layout inside the image (`data/hardware.db` under `/app`).
+
 #### 1) Configure API key for Docker
 
-Set `GEMINI_API_KEY` in your shell before running compose:
+Create or update `.env` in the project root (see [Option A — How configuration and SQLite work](#how-configuration-and-sqlite-work)), or set `GEMINI_API_KEY` in your shell before running compose:
 
 PowerShell:
 
@@ -237,6 +255,22 @@ In an AI-augmented world, choosing *how* to use AI is as important as using it a
 **The Problem:** Users need to find hardware using natural-language, use-case driven queries — e.g. *"I need something to test a mobile app on"* should return phones and tablets. A Text-to-SQL approach (translating the query into a SQL `SELECT`) only works when the query maps directly to an explicit schema column (`brand`, `status`, `purchase_date`). Use-case queries have no corresponding column, so the LLM is forced to hallucinate — producing incorrect results (e.g. returning Samsung when asked for "US companies").
 **The AI Solution:** The backend fetches all hardware records and sends them — together with the user's natural-language query — to the LLM. The LLM acts as a semantic filter: it reads every record, understands the intent of the query, and returns only the IDs of the records that genuinely match. The backend then retrieves exactly those rows and returns them.
 **Result:** True semantic understanding regardless of which columns exist in the schema. An intuitive UI with distinct "Standard" and "AI-Mode" states, and an unchanged API contract — the frontend required zero changes.
+
+### Additional gaps flagged by an AI-assisted code review
+
+The items below were **surfaced by an automated / AI-assisted code review**, not by manual audit alone. They complement [Implementation Status & Trade-offs](#implementation-status--trade-offs) (authentication, prompt injection, token limits, privacy, and [AI Cost & Rate-Limit Roadmap](#ai-cost--rate-limit-roadmap)) but call out details that are easy to miss there. They matter most when the API is reachable outside a single trusted network.
+
+1. **`/api/ai/*` has no authentication or role check.**  
+   Unlike admin CRUD (which at least checks `X-User-Role`, however weak), the AI routes — `POST /api/ai/seed`, `POST /api/ai/seed/preview`, and `POST /api/ai/search` — do not verify login or identity. Any client that can reach the backend can trigger Gemini calls, bulk-insert via the AI seed pipeline, and obtain LLM-filtered search results. The per-user quota ideas under [AI Cost & Rate-Limit Roadmap](#ai-cost--rate-limit-roadmap) assume an authenticated caller; today that assumption does not hold. **Mitigation:** require a valid session/token on all AI endpoints; restrict `seed` / `preview` to admin; tie quotas and usage logging to a real `user_id` from the token.
+
+2. **Rentals API trusts client-supplied `user_id`.**  
+   `POST /api/rentals/rent` and `GET /api/rentals/my` take `user_id` from the JSON body or query string. Nothing binds that ID to the logged-in principal (there is no server-side principal yet). A malicious or curious client can rent hardware “as” another user or list another user’s active rentals. **Mitigation:** derive `user_id` exclusively from the authenticated session (JWT claims, session cookie, etc.); reject mismatches.
+
+3. **Automated tests omit plain bulk import.**  
+   The suite covers core rental logic and AI service behaviour (with mocks), but `POST /api/admin/seed` (non-AI JSON bulk insert and `rejected` reporting) is not covered by dedicated API tests. **Mitigation:** add integration tests for happy path, validation rejections, and duplicate-ID batch errors.
+
+4. **`purchase_date` ORM vs schema type nuance.**  
+   The `Hardware` model maps `purchase_date` with a SQLAlchemy `DateTime` column while Pydantic uses `datetime.date`. SQLite is permissive; a future PostgreSQL migration may surface normalisation or comparison quirks. **Mitigation:** align column type with `Date` or document intentional storage as date-only UTC midnight.
 
 ---
 
@@ -437,6 +471,14 @@ Currently any authenticated user can trigger `/api/ai/search` an unlimited numbe
 #### [P5] Smarter token-usage reduction (embedding-based search)
 
 As noted in the semantic search correction entry above, the LLM-as-filter approach is O(n) in token cost per query. Before quotas and budgets become difficult to enforce, replace it with embedding-based vector search (Gemini Embedding API + pgvector or Qdrant). This reduces every search to a single, cheap embedding call regardless of catalogue size, making per-user quotas far easier to stay within and dramatically lowering the cost per query.
+
+#### [P6 — Low priority] Client disconnect and in-flight AI search
+
+**Current behaviour (acceptable for the MVP):** Dashboard AI search is a single synchronous `POST /api/ai/search`. If the user refreshes the page or navigates away while the request is pending, the browser typically aborts the `fetch`; the UI does not show a result and the AI filter is not written to `sessionStorage` until a successful response arrives.
+
+**Why this is still worth tracking:** The FastAPI handler does not check `Request.is_disconnected()` (or equivalent), so the backend may continue the Gemini call to completion even though the client is gone — consuming RPM/tokens for a response that will never be delivered.
+
+**Deferred improvements (low priority):** Poll for client disconnect during `llm_filter_hardware` and cancel the work where the HTTP client supports it; or, if searches become very slow, introduce a job id + polling/SSE so a refresh does not lose an expensive in-flight operation. None of this is required for the current MVP scope.
 
 ---
 
