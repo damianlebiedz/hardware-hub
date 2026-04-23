@@ -144,14 +144,7 @@
           'hardware-list-body--refreshing': fetching && allHardware.length > 0,
         }"
       >
-        <template v-if="!(fetching && allHardware.length === 0)">
-      <div v-if="displayedRows.length === 0" class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-        </svg>
-        <p>No hardware items found.</p>
-      </div>
-      <div v-else class="table-wrap">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -161,6 +154,7 @@
                   type="checkbox"
                   class="row-checkbox"
                   :checked="allFilteredSelected"
+                  :disabled="displayedRows.length === 0"
                   @change="toggleAllDisplayed"
                 />
               </th>
@@ -256,10 +250,30 @@
                 </div>
               </td>
             </tr>
+            <tr
+              v-if="fetching && allHardware.length === 0 && showTableLoadingRow"
+              class="table-loading-row"
+            >
+              <td :colspan="isAdmin ? 7 : 5">
+                <div class="table-loading-cell" role="status" aria-live="polite">
+                  <span class="spinner table-loading-spinner" aria-hidden="true" />
+                  <p class="table-loading-label">Loading hardware…</p>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="displayedRows.length === 0 && !fetching" class="table-empty-message-row">
+              <td :colspan="isAdmin ? 7 : 5">
+                <div class="empty-state">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                  </svg>
+                  <p>No hardware items found.</p>
+                </div>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
-        </template>
       </div>
     </div>
 
@@ -324,6 +338,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
 import { listHardware, rentHardware, aiSearch, createHardware, deleteHardware, updateHardware } from '../api/client.js'
 import { getStoredUser } from '../api/client.js'
+import { useDelayedTableLoading } from '../composables/useDelayedTableLoading.js'
 
 const AI_FILTER_SESSION_KEY = 'hardware_hub_dashboard_ai_filter'
 const AUTO_REFRESH_MS = 60_000
@@ -338,6 +353,9 @@ const isAdmin = user?.role === 'admin'
 const allHardware = ref([])
 const fetching    = ref(true)
 const error       = ref('')
+
+const hardwareListEmpty = computed(() => allHardware.value.length === 0)
+const showTableLoadingRow = useDelayedTableLoading(fetching, hardwareListEmpty)
 
 const searchQuery  = ref('')
 const statusFilter = ref('All')
@@ -1180,7 +1198,15 @@ function statusClass(status) {
 
 /* ── AI loading state ─────────────────────────────────────────────────── */
 .hardware-list-body--pending {
-  min-height: 10rem;
+  min-height: 0;
+}
+
+.table-empty-message-row td {
+  padding: 0;
+  vertical-align: middle;
+}
+.table-empty-message-row .empty-state {
+  padding: 3rem 1.5rem;
 }
 .hardware-list-body--refreshing {
   opacity: 0.92;
@@ -1195,6 +1221,9 @@ function statusClass(status) {
   padding: 4rem 2rem;
   gap: .75rem;
   text-align: center;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 .ai-loading-spinner {
   width: 36px !important;

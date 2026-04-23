@@ -151,14 +151,54 @@ p  { line-height: 1.6; }
   overflow-y: hidden;
   border-radius: var(--radius);
   border: 1px solid var(--border);
+  /* Match search bar surface (lighter than page --bg) */
+  background: var(--white);
 }
 table { width: 100%; border-collapse: collapse; font-size: .875rem; table-layout: fixed; }
-thead { background: var(--bg); }
+thead { background: var(--white); }
 th { padding: .65rem 1rem; text-align: left; font-weight: 600; color: var(--text-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
 td { padding: .7rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 tbody tr { height: 3.375rem; }
 tbody tr:last-child td { border-bottom: none; }
-tbody tr:hover { background: var(--bg); }
+tbody tr:not(.table-empty-message-row):not(.table-loading-row):hover { background: var(--bg); }
+tbody tr.table-empty-message-row {
+  height: auto;
+}
+tbody tr.table-empty-message-row:hover {
+  background: var(--white);
+}
+tbody tr.table-loading-row {
+  height: auto;
+}
+tbody tr.table-loading-row td {
+  padding: 0;
+  vertical-align: middle;
+  border-bottom: none;
+}
+tbody tr.table-loading-row:hover {
+  background: var(--white);
+}
+.table-loading-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .75rem;
+  padding: 3rem 2rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+.table-loading-cell .table-loading-spinner {
+  width: 36px !important;
+  height: 36px !important;
+  border-width: 3px !important;
+}
+.table-loading-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--brand);
+  margin: 0;
+}
 
 /* ── Status badges ────────────────────────────────────────────────────────── */
 .badge {

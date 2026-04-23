@@ -295,7 +295,7 @@
                 · {{ plainSeedResult?.rejected?.length }} skipped
               </span>
             </div>
-            <button class="btn-icon overlay-close" @click="showRejectedOverlay = false">✕</button>
+            <button class="btn-icon overlay-close" type="button" @click="showRejectedOverlay = false" aria-label="Close">✕</button>
           </div>
 
           <div class="overlay-list">
@@ -310,15 +310,6 @@
               </div>
               <div class="rejected-overlay-reason">{{ formatRejectionReason(rej.reason) }}</div>
             </div>
-          </div>
-
-          <div class="overlay-footer">
-            <button class="btn btn-sm btn-danger-outline" type="button" @click="clearPickedFile">
-              Dismiss all
-            </button>
-            <button class="btn btn-ghost btn-sm" @click="showRejectedOverlay = false">
-              Close
-            </button>
           </div>
         </div>
       </div>

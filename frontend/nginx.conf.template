@@ -18,9 +18,11 @@ server {
 
     # Proxy /api — BACKEND_UPSTREAM = host:port (default backend:8000). For Railway HTTPS use
     # https://… in BACKEND_UPSTREAM instead (see nginx.public.conf.template path in entrypoint).
+    # Important: with a *variable* host, `proxy_pass …/api/` drops the path suffix (e.g. auth/login
+    # becomes only /api/). Use no URI suffix so the full $request_uri reaches FastAPI.
     location /api/ {
         set              $backend_upstream "${BACKEND_UPSTREAM}";
-        proxy_pass       http://$backend_upstream/api/;
+        proxy_pass       http://$backend_upstream;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;

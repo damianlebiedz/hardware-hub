@@ -16,22 +16,7 @@
         'rentals-body--refreshing': fetching && rentals.length > 0,
       }"
     >
-      <template v-if="!(fetching && rentals.length === 0)">
-      <div v-if="rentals.length === 0" class="empty-state card">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/>
-          <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/>
-        </svg>
-        <p>You have no active rentals.</p>
-        <RouterLink
-          to="/dashboard"
-          class="btn btn-ghost btn-sm browse-hardware-link"
-          style="margin-top:.75rem;"
-        >
-          Browse hardware
-        </RouterLink>
-      </div>
-      <div v-else class="table-wrap">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -59,10 +44,38 @@
                 </button>
               </td>
             </tr>
+            <tr
+              v-if="fetching && rentals.length === 0 && showTableLoadingRow"
+              class="table-loading-row"
+            >
+              <td colspan="4">
+                <div class="table-loading-cell" role="status" aria-live="polite">
+                  <span class="spinner table-loading-spinner" aria-hidden="true" />
+                  <p class="table-loading-label">Loading rentals…</p>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="rentals.length === 0 && !fetching" class="table-empty-message-row">
+              <td colspan="4">
+                <div class="empty-state">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/>
+                    <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/>
+                  </svg>
+                  <p>You have no active rentals.</p>
+                  <RouterLink
+                    to="/dashboard"
+                    class="btn btn-ghost btn-sm browse-hardware-link"
+                    style="margin-top:.75rem;"
+                  >
+                    Browse hardware
+                  </RouterLink>
+                </div>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
-      </template>
     </div>
   </div>
 
@@ -75,19 +88,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { myRentals, returnHardware, listHardware } from '../api/client.js'
 import { getStoredUser } from '../api/client.js'
+import { useDelayedTableLoading } from '../composables/useDelayedTableLoading.js'
 
 const user = getStoredUser()
 
 const AUTO_REFRESH_MS = 60_000
 let rentalsRefreshTimer = null
+let rentalsLoadInFlight = false
 
 const rentals     = ref([])
-const fetching    = ref(false)
+const fetching    = ref(true)
 const error       = ref('')
+
+const rentalsEmpty = computed(() => rentals.value.length === 0)
+const showTableLoadingRow = useDelayedTableLoading(fetching, rentalsEmpty)
 const returningId = ref(null)
 const toast       = ref('')
 let toastTimer    = null
@@ -99,8 +117,12 @@ function showToast(msg) {
 }
 
 async function loadRentals() {
-  if (!user) return
-  if (fetching.value) return
+  if (!user) {
+    fetching.value = false
+    return
+  }
+  if (rentalsLoadInFlight) return
+  rentalsLoadInFlight = true
   error.value = ''
   fetching.value = true
   try {
@@ -119,6 +141,7 @@ async function loadRentals() {
     error.value = err.message || 'Failed to load rentals.'
   } finally {
     fetching.value = false
+    rentalsLoadInFlight = false
   }
 }
 
@@ -178,11 +201,19 @@ function formatDate(iso) {
 }
 
 .rentals-body--pending {
-  min-height: 10rem;
+  min-height: 0;
 }
 .rentals-body--refreshing {
   opacity: 0.92;
   transition: opacity 0.12s ease-out;
+}
+
+.table-empty-message-row td {
+  padding: 0;
+  vertical-align: middle;
+}
+.table-empty-message-row .empty-state {
+  padding: 3rem 1.5rem;
 }
 
 .action-toast {

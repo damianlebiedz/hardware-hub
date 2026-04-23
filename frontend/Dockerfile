@@ -24,7 +24,8 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY nginx.public.conf.template /etc/nginx/templates/nginx.public.conf.template
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+# Strip Windows CRLF so the shebang stays valid (avoids: exec: no such file)
+RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 ENV BACKEND_UPSTREAM=backend:8000
 
