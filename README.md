@@ -352,6 +352,8 @@ The app uses password-verified login, but session/auth state is still handled wi
 The frontend stores that user object in `localStorage` and sends role context in headers for admin-gated routes.  
 No signed access token, refresh token, or HTTP-only cookie session is issued.
 
+**Admin UI in the Vue app:** The `/admin` route uses `meta: { requiresAuth: true, requiresAdmin: true }`. A global `beforeEach` guard redirects non-admins to `/dashboard` if they try to open `/admin` by URL. The top navigation in `App.vue` renders the "Admin Panel" link only when `user.role === 'admin'`, so non-admin users never see that entry.
+
 **Why:** This project is a timeboxed MVP focused on proving the rental workflow, AI seed import, and semantic search.  
 Implementing full token/session lifecycle security (JWT/OIDC, refresh, revocation, hardened cookie handling) was deferred to keep delivery scope realistic.
 

@@ -14,16 +14,23 @@ COPY . .
 RUN npm run build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-# Serve the compiled assets with nginx.  The nginx.conf proxies /api requests
-# to the FastAPI backend container on the Docker Compose internal network.
+# Serve the compiled assets with nginx.  At runtime, docker-entrypoint.sh renders
+# nginx.conf from nginx.conf.template so BACKEND_UPSTREAM can target Docker Compose
+# (backend:8000) or Railway private DNS (<service>.railway.internal:8000).
 FROM nginx:1.27-alpine AS runtime
 
-# Remove the default nginx config and replace with ours.
-RUN rm /etc/nginx/conf.d/default.conf
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN apk add --no-cache gettext
 
-# Copy compiled assets from the builder stage.
+RUN rm -f /etc/nginx/conf.d/default.conf
+
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+# Docker Compose: default service hostname. Railway: set in the frontend service Variables.
+ENV BACKEND_UPSTREAM=backend:8000
+
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
