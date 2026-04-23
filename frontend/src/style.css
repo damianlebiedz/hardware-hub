@@ -145,6 +145,11 @@ p  { line-height: 1.6; }
 .nav-link:hover, .router-link-active.nav-link { color: var(--brand); border-color: var(--brand); }
 .navbar-user { font-size: .8rem; color: var(--text-muted); }
 
+/* Table body: loading + empty (and across /dashboard vs /my-rentals) */
+:root {
+  --table-placeholder-min-h: 21rem;
+}
+
 /* ── Table ────────────────────────────────────────────────────────────────── */
 .table-wrap {
   overflow-x: auto;
@@ -185,6 +190,8 @@ tbody tr.table-loading-row:hover {
   justify-content: center;
   gap: .75rem;
   padding: 3rem 2rem;
+  min-height: var(--table-placeholder-min-h);
+  box-sizing: border-box;
   text-align: center;
   color: var(--text-muted);
 }
@@ -255,6 +262,17 @@ tbody tr.table-loading-row:hover {
 /* ── Empty state ──────────────────────────────────────────────────────────── */
 .empty-state { padding: 3rem; text-align: center; color: var(--text-muted); }
 .empty-state svg { margin-bottom: 1rem; opacity: .4; }
+
+/* Inside data tables: match loading row height so tabs / states do not jump */
+.table-empty-message-row .empty-state {
+  min-height: var(--table-placeholder-min-h);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+}
 
 /* ── Login page ───────────────────────────────────────────────────────────── */
 .login-page {

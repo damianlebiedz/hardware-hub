@@ -1133,9 +1133,6 @@ function statusClass(status) {
   padding: 0;
   vertical-align: middle;
 }
-.table-empty-message-row .empty-state {
-  padding: 3rem 1.5rem;
-}
 .hardware-list-body--refreshing {
   opacity: 0.92;
   transition: opacity 0.12s ease-out;

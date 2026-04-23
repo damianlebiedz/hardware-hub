@@ -212,9 +212,6 @@ function formatDate(iso) {
   padding: 0;
   vertical-align: middle;
 }
-.table-empty-message-row .empty-state {
-  padding: 3rem 1.5rem;
-}
 
 .action-toast {
   position: fixed;
