@@ -12,8 +12,8 @@ Covers two functions:
 
 Strategy
 --------
-The Gemini API call is mocked entirely — no network, no key required.
-``monkeypatch`` sets a fake ``GEMINI_API_KEY``.
+The Gemini API call is mocked entirely — no network.  ``monkeypatch`` sets
+fake ``GEMINI_API_KEY`` and ``GEMINI_MODEL`` (both are required by the service).
 ``unittest.mock.patch`` replaces ``genai.Client`` so that
 ``client.models.generate_content`` returns a controlled JSON string.
 """
@@ -25,6 +25,13 @@ import pytest
 from fastapi import HTTPException
 
 from backend.services.ai_service import llm_filter_hardware, sanitize_with_gemini
+
+_TEST_GEMINI_MODEL: str = "fake-model-for-tests"
+
+
+def _patch_gemini_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+    monkeypatch.setenv("GEMINI_MODEL", _TEST_GEMINI_MODEL)
 
 # ---------------------------------------------------------------------------
 # Minimal valid hardware dict (satisfies HardwareCreate without an id field)
@@ -67,7 +74,7 @@ class TestNonDictItemsAreSkipped:
 
     def _run(self, monkeypatch: pytest.MonkeyPatch, payload: list) -> list:
         """Shared runner: mock env + Gemini, call sanitize_with_gemini."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
             return sanitize_with_gemini([{}]).records  # raw input ignored — Gemini is mocked
 
@@ -112,7 +119,7 @@ class TestNonDictItemsAreSkipped:
         NOT an unhandled AttributeError (which would surface as 500).
         """
         payload = [1, "bad", None, []]
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
 
         with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
             with pytest.raises(HTTPException) as exc_info:
@@ -132,7 +139,7 @@ class TestNormalValidationBehaviour:
     """Regression guard: the fix must not break handling of valid payloads."""
 
     def _run(self, monkeypatch: pytest.MonkeyPatch, payload: list) -> list:
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch("backend.services.ai_service.genai.Client", _mock_gemini(payload)):
             return sanitize_with_gemini([{}]).records
 
@@ -178,7 +185,7 @@ class TestNormalValidationBehaviour:
         raw_input = [{"name": "MacBook Pro", "brand": "Appel", "status": "Available"}]
         cleaned_output = [{"name": "MacBook Pro", "brand": "Apple", "status": "Available"}]
 
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch("backend.services.ai_service.genai.Client", _mock_gemini(cleaned_output)):
             result = sanitize_with_gemini(raw_input)
 
@@ -196,7 +203,7 @@ class TestNormalValidationBehaviour:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """SanitizeResult.changes must be empty when the AI makes no corrections."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch("backend.services.ai_service.genai.Client", _mock_gemini([_VALID_RECORD])):
             result = sanitize_with_gemini([_VALID_RECORD])
 
@@ -242,7 +249,7 @@ class TestLlmFilterHardware:
 
     def test_returns_matching_ids(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Happy path: Gemini returns a JSON array of IDs; function returns them as ints."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch("backend.services.ai_service.genai.Client", _mock_gemini_text("[1, 3]")):
             result = llm_filter_hardware("mobile phones", _SAMPLE_RECORDS)
 
@@ -252,7 +259,7 @@ class TestLlmFilterHardware:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When records=[], return [] immediately and never call the Gemini API."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         mock_cls = _mock_gemini_text("[]")
         with patch("backend.services.ai_service.genai.Client", mock_cls):
             result = llm_filter_hardware("anything", [])
@@ -262,7 +269,7 @@ class TestLlmFilterHardware:
 
     def test_empty_llm_result_returns_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When Gemini returns '[]', function returns an empty list without error."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch("backend.services.ai_service.genai.Client", _mock_gemini_text("[]")):
             result = llm_filter_hardware("nothing matches", _SAMPLE_RECORDS)
 
@@ -270,7 +277,7 @@ class TestLlmFilterHardware:
 
     def test_invalid_json_raises_502(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When Gemini returns non-JSON text, HTTPException 502 is raised."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch(
             "backend.services.ai_service.genai.Client",
             _mock_gemini_text("not valid json at all"),
@@ -282,7 +289,7 @@ class TestLlmFilterHardware:
 
     def test_non_array_json_raises_502(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When Gemini returns a JSON object instead of an array, HTTPException 502 is raised."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch(
             "backend.services.ai_service.genai.Client",
             _mock_gemini_text('{"ids": [1, 2]}'),
@@ -296,7 +303,7 @@ class TestLlmFilterHardware:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When the returned array contains non-integer elements, HTTPException 502 is raised."""
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-tests")
+        _patch_gemini_env(monkeypatch)
         with patch(
             "backend.services.ai_service.genai.Client",
             _mock_gemini_text('["one", "two"]'),
