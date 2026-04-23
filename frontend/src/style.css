@@ -283,6 +283,14 @@ tbody tr.table-loading-row:hover {
 .toast-body { font-size: .82rem; color: var(--text-muted); }
 .toast-actions { display: flex; gap: .5rem; }
 
+.toast.toast--error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  box-shadow: 0 8px 24px rgba(127, 29, 29, 0.12);
+}
+.toast.toast--error .toast-title { color: #b91c1c; }
+.toast.toast--error .toast-body { color: #7f1d1d; }
+
 .toast-enter-active { animation: toast-in .25s ease; }
 .toast-leave-active { animation: toast-in .2s ease reverse; }
 @keyframes toast-in {

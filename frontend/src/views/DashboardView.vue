@@ -332,6 +332,12 @@
       <button class="btn-icon" style="margin-left:.5rem;" @click="toast = ''">×</button>
     </div>
   </Transition>
+  <Transition name="toast">
+    <div v-if="errorToast" class="action-toast action-toast--error" role="alert">
+      <span>{{ errorToast }}</span>
+      <button class="btn-icon" style="margin-left:.5rem; flex-shrink:0;" @click="dismissErrorToast">×</button>
+    </div>
+  </Transition>
 </template>
 
 <script setup>
@@ -513,7 +519,7 @@ async function runAiSearch() {
     searchQuery.value = ''
     persistAiFilter()
   } catch (err) {
-    error.value = err.message || 'AI search failed.'
+    showErrorToast(err.message || 'AI search failed.')
   } finally {
     aiLoading.value = false
     if (aiResults.value === null) {
@@ -547,6 +553,18 @@ function showToast(msg) {
   toast.value = msg
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toast.value = '' }, 4000)
+}
+
+const errorToast = ref('')
+let errorToastTimer = null
+function showErrorToast(msg) {
+  errorToast.value = msg
+  clearTimeout(errorToastTimer)
+  errorToastTimer = setTimeout(() => { errorToast.value = '' }, 10_000)
+}
+function dismissErrorToast() {
+  errorToast.value = ''
+  clearTimeout(errorToastTimer)
 }
 
 // ── Rent ─────────────────────────────────────────────────────────────────────
@@ -1253,6 +1271,13 @@ function statusClass(status) {
   font-size: .85rem;
   box-shadow: var(--shadow-md);
   max-width: 360px;
+}
+.action-toast--error {
+  z-index: 450;
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #7f1d1d;
+  box-shadow: 0 8px 24px rgba(127, 29, 29, 0.12);
 }
 .toast-enter-active, .toast-leave-active { transition: opacity .2s, transform .2s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }

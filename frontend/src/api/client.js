@@ -26,6 +26,36 @@ function roleHeader() {
   return user ? { 'X-User-Role': user.role } : {}
 }
 
+/**
+ * Turn FastAPI `detail` (string, list of validation errors, or object) into a short message
+ * for `Error`, so the UI does not show `[object Object]` or minified JSON.
+ */
+function formatApiErrorDetail(detail) {
+  if (detail == null) return 'Request failed.'
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object' && 'msg' in item) return String(item.msg)
+        try {
+          return JSON.stringify(item)
+        } catch {
+          return String(item)
+        }
+      })
+      .join('; ')
+  }
+  if (typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string') {
+    return detail.message
+  }
+  try {
+    return JSON.stringify(detail)
+  } catch {
+    return String(detail)
+  }
+}
+
 /** Generic fetch wrapper — throws on non-2xx responses. */
 async function request(method, path, body) {
   const headers = { 'Content-Type': 'application/json', ...roleHeader() }
@@ -36,8 +66,11 @@ async function request(method, path, body) {
   })
   if (!res.ok) {
     let detail = res.statusText
-    try { detail = (await res.json()).detail ?? detail } catch { /* ignored */ }
-    throw new Error(detail)
+    try {
+      const body = await res.json()
+      detail = body.detail ?? detail
+    } catch { /* ignored */ }
+    throw new Error(formatApiErrorDetail(detail))
   }
   // 204 No Content has no body
   if (res.status === 204) return null

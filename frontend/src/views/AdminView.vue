@@ -331,7 +331,7 @@
     </Transition>
   </Teleport>
 
-  <!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+  <!-- ── Toast (success) ────────────────────────────────────────────────────── -->
   <Transition name="toast">
     <div v-if="showToast" class="toast" role="alert">
       <div class="toast-header">
@@ -342,6 +342,15 @@
       <div class="toast-actions">
         <button class="btn btn-primary btn-sm" @click="goToDashboard">View in Dashboard →</button>
       </div>
+    </div>
+  </Transition>
+  <Transition name="toast">
+    <div v-if="showErrorToast" class="toast toast--error" role="alert">
+      <div class="toast-header">
+        <span class="toast-title">Error</span>
+        <button class="toast-close" @click="dismissErrorToast">×</button>
+      </div>
+      <div class="toast-body">{{ errorToastMessage }}</div>
     </div>
   </Transition>
 </template>
@@ -524,7 +533,7 @@ async function handlePreview() {
     saveSession()
     showReviewOverlay.value = true
   } catch (err) {
-    seedError.value = err.message || 'AI preview failed.'
+    showErrorNotification(err.message || 'AI preview failed.')
   } finally {
     seedStep.value = 'idle'
   }
@@ -567,7 +576,7 @@ async function handleConfirmImport() {
     resetProposals()
     clearFile()
   } catch (err) {
-    seedError.value = err.message || 'Import failed.'
+    showErrorNotification(err.message || 'Import failed.')
   } finally {
     seedStep.value = 'idle'
   }
@@ -608,7 +617,7 @@ async function handlePlainImport() {
     // If there were skipped records, keep the file until the user dismisses
     // (or removes the file) via clearPickedFile, or picks a new file.
   } catch (err) {
-    seedError.value = err.message || 'Import failed.'
+    showErrorNotification(err.message || 'Import failed.')
   } finally {
     seedStep.value = 'idle'
   }
@@ -644,6 +653,10 @@ const showToast    = ref(false)
 const toastMessage = ref('')
 let toastTimer     = null
 
+const showErrorToast   = ref(false)
+const errorToastMessage = ref('')
+let errorToastTimer     = null
+
 function showImportToast(message) {
   toastMessage.value = message
   showToast.value = true
@@ -652,6 +665,17 @@ function showImportToast(message) {
 }
 function dismissToast() { showToast.value = false; clearTimeout(toastTimer) }
 function goToDashboard() { dismissToast(); router.push('/dashboard') }
+
+function showErrorNotification(message) {
+  errorToastMessage.value = message
+  showErrorToast.value = true
+  clearTimeout(errorToastTimer)
+  errorToastTimer = setTimeout(dismissErrorToast, 10_000)
+}
+function dismissErrorToast() {
+  showErrorToast.value = false
+  clearTimeout(errorToastTimer)
+}
 </script>
 
 <style scoped>
