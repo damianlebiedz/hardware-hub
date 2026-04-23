@@ -199,7 +199,7 @@ Analyze my technical context and produce two markdown files:
 </details>
 
 <details>
-<summary>Semantic search rework — LLM-as-filter (Cursor prompt)</summary>
+<summary>Semantic search rework — LLM-as-filter (Claude Sonnet 4.6 in Cursor)</summary>
 
 *Summary:* Replaces Text-to-SQL. Full hardware JSON + query → LLM returns only matching **integer IDs**; no frontend or schema change. *Code:* `backend/services/ai_service.py`, `backend/routers/ai.py`, `tests/test_ai_service.py`.
 
@@ -243,7 +243,7 @@ Run: poetry run ruff check backend/ tests/ && poetry run mypy backend/
 </details>
 
 <details>
-<summary>Bootstrap admin — full task prompt</summary>
+<summary>Bootstrap admin (Claude Sonnet 4.6 in Cursor)</summary>
 
 ```text
 Task: Implement automatic bootstrap of the first admin user at application startup.
