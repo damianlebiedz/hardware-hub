@@ -19,6 +19,7 @@
   --shadow-md:   0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
 }
 
+html { scrollbar-gutter: stable; }
 html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; color: var(--text); background: var(--bg); }
 #app { min-height: 100vh; display: flex; flex-direction: column; }
 
@@ -51,18 +52,46 @@ p  { line-height: 1.6; }
   -webkit-user-select: none;
   -webkit-user-drag: none;
 }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:disabled { opacity: .5; cursor: default; }
+/* While a .btn is disabled only because a request is in flight, keep a neutral cursor. */
+.btn.btn--pending:disabled { cursor: default; }
 .btn-primary   { background: var(--brand);   color: var(--white); }
 .btn-primary:hover:not(:disabled)  { background: var(--brand-dark); }
+.btn-ai        { background: var(--brand); color: var(--white); }
+.btn-ai:hover:not(:disabled)       { background: var(--brand-dark); }
 .btn-danger    { background: var(--danger);  color: var(--white); }
 .btn-danger:hover:not(:disabled)   { background: var(--danger-dark); }
 .btn-ghost     { background: transparent; color: var(--brand); border: 1px solid var(--brand); }
 .btn-ghost:hover:not(:disabled)    { background: var(--brand-light); }
-.btn-sm { padding: .3rem .75rem; font-size: .8rem; }
+.btn-sm { padding: .3rem .75rem; font-size: .875rem; height: 1.875rem; }
+/* Table cells: match toolbar small buttons (+ Add Hardware, etc.) */
+.btn.btn-table-action {
+  width: 100%;
+  justify-content: center;
+  height: 1.875rem;
+  min-height: 1.875rem;
+  max-height: 1.875rem;
+  line-height: 1;
+  box-sizing: border-box;
+}
+/* Slightly narrower than full cell (e.g. Return) — same height as .btn-sm */
+.btn.btn-return-narrow {
+  width: auto;
+  min-width: 4.75rem;
+  padding-left: 0.85rem;
+  padding-right: 0.85rem;
+  justify-content: center;
+  height: 1.875rem;
+  min-height: 1.875rem;
+  max-height: 1.875rem;
+  line-height: 1;
+  box-sizing: border-box;
+}
 .btn-icon {
   padding: .35rem .5rem; background: transparent; border: none;
   cursor: pointer; color: var(--text-muted); border-radius: var(--radius);
   line-height: 1;
+  font-size: .875rem;
 }
 .btn-icon:hover { color: var(--text); background: var(--border); }
 
@@ -77,7 +106,7 @@ p  { line-height: 1.6; }
   width: 100%;
 }
 .input:focus, select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
-.input:disabled { background: var(--bg); color: var(--text-muted); cursor: not-allowed; }
+.input:disabled { background: var(--bg); color: var(--text-muted); cursor: default; }
 
 /* ── Card ─────────────────────────────────────────────────────────────────── */
 .card {
@@ -117,11 +146,17 @@ p  { line-height: 1.6; }
 .navbar-user { font-size: .8rem; color: var(--text-muted); }
 
 /* ── Table ────────────────────────────────────────────────────────────────── */
-.table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+table { width: 100%; border-collapse: collapse; font-size: .875rem; table-layout: fixed; }
 thead { background: var(--bg); }
-th { padding: .65rem 1rem; text-align: left; font-weight: 600; color: var(--text-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; }
-td { padding: .7rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th { padding: .65rem 1rem; text-align: left; font-weight: 600; color: var(--text-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+td { padding: .7rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tbody tr { height: 3.375rem; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--bg); }
 
@@ -149,7 +184,7 @@ tbody tr:hover { background: var(--bg); }
 }
 .search-bar.ai-active { border-color: var(--brand); background: var(--brand-light); }
 .search-bar input { border: none; outline: none; background: transparent; flex: 1; font-size: .9rem; color: var(--text); }
-.search-bar input:disabled { color: var(--text-muted); cursor: not-allowed; }
+.search-bar input:disabled { color: var(--text-muted); cursor: default; }
 .search-bar .search-icon { color: var(--text-muted); flex-shrink: 0; }
 
 /* ── Toggle switch ────────────────────────────────────────────────────────── */

@@ -25,6 +25,13 @@ router: APIRouter = APIRouter(prefix="/api/hardware", tags=["Hardware"])
 
 _VALID_STATUSES: frozenset[str] = frozenset({"Available", "In Use", "Repair"})
 _SORTABLE_FIELDS: frozenset[str] = frozenset({"id", "name", "brand", "purchase_date", "status"})
+_ALLOWED_ADMIN_STATUS_TRANSITIONS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("Available", "Repair"),
+        ("In Use", "Repair"),
+        ("Repair", "Available"),
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +210,9 @@ def update_hardware(
     """Partially update a hardware item's fields.
 
     Accepts any subset of hardware fields; only supplied (non-``None``) values
-    are written.  This endpoint is the intended mechanism for an admin to
-    toggle an item between ``'Available'`` and ``'Repair'``.
+    are written.  Status changes are restricted to: ``Available`` or
+    ``In Use`` → ``Repair``, and ``Repair`` → ``Available`` (rent/return flows
+    handle other transitions).
 
     Args:
         hardware_id: Primary key of the hardware item to update.
@@ -228,6 +236,17 @@ def update_hardware(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Hardware with id={hardware_id} not found.",
         )
+
+    if payload.status is not None and payload.status != hw.status:
+        edge = (hw.status, payload.status)
+        if edge not in _ALLOWED_ADMIN_STATUS_TRANSITIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Invalid status change: use Available or In Use → Repair, "
+                    "or Repair → Available only."
+                ),
+            )
 
     update_data = payload.model_dump(exclude_none=True)
     for field, value in update_data.items():

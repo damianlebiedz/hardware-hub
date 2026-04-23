@@ -6,12 +6,11 @@ This module encapsulates all Gemini API integrations:
   legacy hardware records and returns validated
   :class:`~backend.schemas.HardwareCreate` objects.
 
-* :func:`sanitize_sql` — **critical security gate** that strips markdown
-  fences from an LLM-generated SQL string and verifies it is a read-only
-  ``SELECT`` statement with no destructive keywords.
-
-* :func:`text_to_sql` — semantic search pipeline that translates a natural-
-  language query into a safe SQLite ``SELECT`` statement via Gemini.
+* :func:`llm_filter_hardware` — semantic search pipeline that sends the full
+  list of hardware records and a natural-language query to Gemini and returns
+  the IDs of matching records.  This LLM-as-filter approach supports
+  intent-based queries (e.g. "something to test a mobile app on") that cannot
+  be expressed as SQL column filters.
 
 Environment variables
 ---------------------
@@ -19,7 +18,7 @@ Environment variables
     Required.  Google AI API key.
     Obtain from https://aistudio.google.com/app/apikey.
 ``GEMINI_MODEL``
-    Optional.  Gemini model identifier.  Defaults to ``gemini-2.5-flash``.
+    Required.  Gemini model identifier.
 """
 
 import json
@@ -47,34 +46,30 @@ _SEED_SYSTEM_PROMPT: str = """
 You are a data-cleaning agent for a hardware asset management system.
 You will receive a JSON array of hardware records that may contain errors.
 
-Your task is to return a CLEANED version of the same array, applying ALL of
-the following rules without exception:
+Return a CLEANED version of the same array applying ONLY these conservative rules:
 
-1. **Brand typos**: Correct obvious brand name misspellings.
+1. **Brand typos**: Fix only highly confident brand misspellings.
    Examples: "Appel" → "Apple", "Samsug" → "Samsung", "Lenoco" → "Lenovo".
+   When in doubt, leave the value unchanged.
 
-2. **Date normalisation**: Convert every date to ISO-8601 format "YYYY-MM-DD".
-   If a date is missing or unparseable, set the field to null.
+2. **Date normalisation**: Convert any parseable date to ISO-8601 "YYYY-MM-DD".
+   NEVER set a date to null — if a date value exists and is parseable in any
+   form, keep it and only normalise the format.
+   Set to null only if the value is completely absent or totally unparseable.
 
-3. **Status normalisation**: Map every status value to exactly one of:
-   "Available", "In Use", or "Repair".
-   Mapping rules:
-   - If status is already one of the three valid values, keep it as-is.
-   - If the notes field mentions damage, broken, cracked, fault, repair, or
-     similar, set status to "Repair".
-   - Otherwise, set status to "Available".
+3. **Status**: Keep "Available", "In Use", and "Repair" exactly as-is.
+   Map obvious synonyms only: "broken"/"damaged"/"cracked"/"fault" → "Repair";
+   "rented"/"loaned"/"checked out" → "In Use".
+   If the status is missing or unclear, infer it from the notes field
+   (e.g. notes mentioning damage → "Repair").  When in doubt → "Available".
 
-4. **Duplicate ID resolution**: If two or more records share the same integer
-   "id" field, re-assign unique sequential integers starting from 1, preserving
-   the original order.  If no "id" field is present, omit it entirely from the
-   output (the database will auto-assign).
+4. **Duplicate IDs**: Re-assign unique sequential integers starting from 1
+   if any "id" values are duplicated.  Omit "id" entirely if absent.
 
-5. **Output format**: Return ONLY a valid JSON array.  Do NOT include any
-   explanation, markdown code fences, or extra text.  The response must be
-   parseable by json.loads() with no pre-processing.
+5. **Output**: Return ONLY a valid JSON array — no explanation, no markdown.
 
-6. **Field retention**: Preserve all other fields exactly as provided.  Do
-   not add or remove fields beyond what the rules above require.
+6. **Field retention**: Do NOT add, rename, or null-out fields beyond what
+   these rules require.  If a field needs no correction, leave it exactly as-is.
 """.strip()
 
 # ---------------------------------------------------------------------------
@@ -123,10 +118,14 @@ class SanitizeResult:
             ready for bulk insertion.
         changes: Per-record corrections made by the AI; only records with at
             least one modified field are included.
+        record_indices: Original zero-based position in the raw input payload
+            for each entry in ``records``.  Parallel list to ``records``
+            (``record_indices[i]`` is the source index of ``records[i]``).
     """
 
     records: list[HardwareCreate]
     changes: list[SeedRecordChange] = dc_field(default_factory=list)
+    record_indices: list[int] = dc_field(default_factory=list)
 
 
 def _compute_record_diff(
@@ -226,7 +225,15 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
             ),
         )
 
-    model_name: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name: str | None = os.getenv("GEMINI_MODEL")
+    if not model_name:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "GEMINI_MODEL environment variable is not set. "
+                "The AI seed importer is unavailable."
+            ),
+        )
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
     raw_json: str = json.dumps(raw_records, indent=2, default=str)
@@ -270,6 +277,7 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
     # ── 5. Pydantic validation + diff computation ───────────────────────────
     validated: list[HardwareCreate] = []
     changes: list[SeedRecordChange] = []
+    record_indices: list[int] = []
     skipped: int = 0
 
     for idx, record in enumerate(cleaned_records):
@@ -281,8 +289,13 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
                 raise TypeError(f"Expected a dict, got {type(record).__name__}")
             # Drop auto-assigned IDs returned by Gemini — the DB will assign them.
             record.pop("id", None)
+            # Normalise camelCase purchaseDate → snake_case purchase_date so
+            # that Pydantic can parse it even when Gemini preserves the original key.
+            if "purchaseDate" in record and "purchase_date" not in record:
+                record["purchase_date"] = record.pop("purchaseDate")
             hw = HardwareCreate.model_validate(record)
             validated.append(hw)
+            record_indices.append(idx)
 
             # Compute diff against the original raw record at the same position.
             raw = raw_records[idx] if idx < len(raw_records) else {}
@@ -306,143 +319,63 @@ def sanitize_with_gemini(raw_records: list[dict[str, Any]]) -> SanitizeResult:
         logger.warning("%d record(s) were skipped due to validation errors.", skipped)
 
     logger.info("%d record(s) passed validation and will be inserted.", len(validated))
-    return SanitizeResult(records=validated, changes=changes)
+    return SanitizeResult(records=validated, changes=changes, record_indices=record_indices)
 
 
 # ---------------------------------------------------------------------------
-# Semantic search — Text-to-SQL
+# Semantic search — LLM-as-filter
 # ---------------------------------------------------------------------------
 
-# Exact SQLite DDL for the hardware table, embedded in every search prompt so
-# Gemini has unambiguous column names and types to reason about.
-_HARDWARE_SCHEMA_DDL: str = """
-CREATE TABLE hardware (
-    id            INTEGER  PRIMARY KEY AUTOINCREMENT,
-    name          VARCHAR  NOT NULL,
-    brand         VARCHAR,
-    purchase_date DATETIME,
-    status        VARCHAR  NOT NULL DEFAULT 'Available',
-    notes         TEXT
-);
-""".strip()
+_FILTER_SYSTEM_PROMPT: str = """
+You are a hardware search assistant for an asset management system.
+You will receive a JSON array of hardware records and a natural-language search query.
 
-_SEARCH_SYSTEM_PROMPT: str = f"""
-You are a SQL translation agent for a SQLite database.
-The database contains a single relevant table with the following schema:
-
-{_HARDWARE_SCHEMA_DDL}
-
-Valid values for the `status` column are: 'Available', 'In Use', 'Repair'.
-
-Your task: translate the user's natural-language query into a single, valid
-SQLite SELECT statement that retrieves data from the `hardware` table.
+Your task: return ONLY a valid JSON array of integer IDs of the records that
+semantically match the query.
 
 Rules you MUST follow without exception:
-1. Return ONLY the raw SQL statement — no explanation, no markdown, no code
-   fences, no trailing semicolons.
-2. The statement MUST begin with the word SELECT (case-insensitive).
-3. You MUST NOT produce any statement containing DROP, DELETE, UPDATE, INSERT,
-   PRAGMA, ALTER, CREATE, or any other data-modification keyword.
-4. Use only columns that exist in the schema above.
-5. For status comparisons use the exact casing: 'Available', 'In Use', 'Repair'.
-6. If the query is ambiguous, return a broad SELECT that covers likely intent.
-7. Never use LIMIT unless the user explicitly asks for a limited number of
-   results.
+1. Return ONLY a valid JSON array of integers — no explanation, no markdown
+   code fences, no extra text.  The response must be parseable by json.loads()
+   with no pre-processing.
+2. Match records based on the semantic intent of the query, not just keyword
+   matching.  For example: "something to test a mobile app on" should match
+   phones and tablets even if those words do not appear verbatim in the record.
+3. If no records match, return an empty JSON array: []
+4. Only include IDs of records that actually appear in the provided array.
 """.strip()
 
-# Keywords whose presence in the LLM output must trigger an immediate reject.
-_FORBIDDEN_KEYWORDS: frozenset[str] = frozenset(
-    {"DROP", "DELETE", "UPDATE", "INSERT", "PRAGMA", "ALTER", "CREATE"}
-)
 
+def llm_filter_hardware(query: str, records: list[dict[str, Any]]) -> list[int]:
+    """Send all hardware records and a natural-language query to Gemini and
+    return the IDs of semantically matching records.
 
-def sanitize_sql(raw_sql: str) -> str:
-    """Strip markdown formatting from LLM output and enforce read-only SQL.
-
-    This is the **critical security gate** between the LLM response and the
-    database engine.  It applies three successive checks:
-
-    1. **Markdown stripping** — removes `` ```sql ... ``` `` or
-       `` ``` ... ``` `` fences via :func:`_strip_markdown_fences`.
-    2. **SELECT assertion** — the cleaned string must begin with ``SELECT``
-       (checked case-insensitively after normalisation).
-    3. **Forbidden keyword scan** — the upper-cased token set of the query
-       must not intersect with :data:`_FORBIDDEN_KEYWORDS`.  Tokenisation is
-       done on word boundaries so that ``DROPDOWN`` does not trip the
-       ``DROP`` guard.
+    This is the core of the LLM-as-filter semantic search pipeline.  Unlike
+    Text-to-SQL, this approach does not require the query to map to an explicit
+    schema column.  The LLM reads every record and applies semantic reasoning
+    to determine which records match the user's intent (e.g. "something to
+    test a mobile app on" correctly returns phones and tablets even though
+    the schema has no ``category`` column).
 
     Args:
-        raw_sql: Raw text returned by the Gemini API.
+        query: Free-text search query from the end user, e.g.
+            ``'I need something to test a mobile app on'``.
+        records: Full list of hardware records serialised as dicts (all
+            columns included).  Typically fetched from ``SELECT * FROM
+            hardware`` immediately before calling this function.
 
     Returns:
-        The sanitized SQL string, stripped of whitespace and safe to execute.
-
-    Raises:
-        HTTPException (422): If the cleaned string does not start with
-            ``SELECT``.
-        HTTPException (422): If any forbidden keyword is found in the
-            query tokens.
-
-    Example:
-        >>> sanitize_sql("```sql\\nSELECT * FROM hardware WHERE status='Repair'\\n```")
-        "SELECT * FROM hardware WHERE status='Repair'"
-
-        >>> sanitize_sql("DROP TABLE hardware")
-        # raises HTTPException(422)
-    """
-    cleaned: str = _strip_markdown_fences(raw_sql).rstrip(";").strip()
-
-    if not cleaned.upper().startswith("SELECT"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=("The AI did not return a SELECT statement. " f"Received: {cleaned[:200]!r}"),
-        )
-
-    # Tokenise on word boundaries for accurate keyword detection.
-    tokens: set[str] = set(re.findall(r"\b[A-Za-z_]+\b", cleaned.upper()))
-    found_forbidden: set[str] = tokens & _FORBIDDEN_KEYWORDS
-    if found_forbidden:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=(
-                f"Generated SQL contains forbidden keyword(s): "
-                f"{sorted(found_forbidden)}.  Query rejected for safety."
-            ),
-        )
-
-    return cleaned
-
-
-def text_to_sql(natural_language_query: str) -> str:
-    """Translate a natural-language hardware query into a safe SQLite SELECT.
-
-    Pipeline:
-
-    1. **Prompt construction** — The hardware table DDL and a strict
-       instruction set are combined with the user's query and sent to Gemini.
-    2. **LLM call** — Gemini returns what should be a raw SQL ``SELECT``
-       statement.
-    3. **Security sanitization** — :func:`sanitize_sql` strips any markdown
-       fences and rejects any output that is not a read-only ``SELECT`` or
-       that contains a forbidden keyword.
-
-    Args:
-        natural_language_query: Free-text query from the end user, e.g.
-            ``'Show me broken Apple laptops'``.
-
-    Returns:
-        A sanitized SQLite ``SELECT`` string ready to be executed against the
-        ``hardware`` table.
+        A list of integer hardware IDs whose records the LLM determined to
+        match the query, in the order returned by the model.  An empty list
+        means no records matched.
 
     Raises:
         HTTPException (503): If ``GEMINI_API_KEY`` is not set.
-        HTTPException (502): If the Gemini API call fails.
-        HTTPException (422): If the LLM output fails the security gate (not a
-            SELECT, or contains a forbidden keyword).
+        HTTPException (502): If the Gemini API call fails, or if the model
+            returns output that cannot be parsed as a JSON array of integers.
 
     Example:
-        >>> sql = text_to_sql("Find all Apple items under repair")
-        >>> sql.upper().startswith("SELECT")
+        >>> ids = llm_filter_hardware("broken Apple laptops", all_records)
+        >>> isinstance(ids, list) and all(isinstance(i, int) for i in ids)
         True
     """
     api_key: str | None = os.getenv("GEMINI_API_KEY")
@@ -455,30 +388,74 @@ def text_to_sql(natural_language_query: str) -> str:
             ),
         )
 
-    model_name: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name: str | None = os.getenv("GEMINI_MODEL")
+    if not model_name:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "GEMINI_MODEL environment variable is not set. "
+                "The AI search feature is unavailable."
+            ),
+        )
+
+    if not records:
+        return []
 
     # ── 1. Build the full prompt ────────────────────────────────────────────
-    full_prompt: str = f"{_SEARCH_SYSTEM_PROMPT}\n\n" f"User query: {natural_language_query}"
+    records_json: str = json.dumps(records, indent=2, default=str)
+    full_prompt: str = (
+        f"{_FILTER_SYSTEM_PROMPT}\n\n"
+        f"Hardware records:\n{records_json}\n\n"
+        f"User query: {query}"
+    )
 
     # ── 2. Call the Gemini API ──────────────────────────────────────────────
     try:
         client: genai.Client = genai.Client(api_key=api_key)
         logger.info(
-            "Translating query to SQL via Gemini (%s): %r", model_name, natural_language_query
+            "Filtering %d hardware record(s) via Gemini (%s) for query: %r",
+            len(records),
+            model_name,
+            query,
         )
         response: genai_types.GenerateContentResponse = client.models.generate_content(
             model=model_name,
             contents=full_prompt,
         )
-        raw_sql: str = response.text or ""
+        raw_response: str = response.text or ""
     except Exception as exc:
-        logger.exception("Gemini API call failed during text-to-SQL: %s", exc)
+        logger.exception("Gemini API call failed during hardware filtering: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Gemini API call failed: {exc}",
         ) from exc
 
-    # ── 3. Sanitize and return ──────────────────────────────────────────────
-    safe_sql: str = sanitize_sql(raw_sql)
-    logger.info("Generated safe SQL: %s", safe_sql)
-    return safe_sql
+    # ── 3. Parse the response as a JSON integer array ───────────────────────
+    clean_text: str = _strip_markdown_fences(raw_response)
+
+    try:
+        parsed: Any = json.loads(clean_text)
+        if not isinstance(parsed, list):
+            raise ValueError(f"Expected a JSON array, got {type(parsed).__name__}.")
+        ids: list[int] = []
+        for item in parsed:
+            if not isinstance(item, int):
+                raise ValueError(f"Expected integer IDs, got {type(item).__name__}: {item!r}.")
+            ids.append(item)
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.error(
+            "Failed to parse Gemini filter response as a JSON integer array: %s",
+            clean_text[:500],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Gemini returned an unexpected response format: {exc}",
+        ) from exc
+
+    logger.info(
+        "Gemini matched %d record(s) for query %r: IDs=%s",
+        len(ids),
+        query,
+        ids,
+    )
+    return ids

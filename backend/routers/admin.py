@@ -9,6 +9,7 @@ As with other admin-gated endpoints in this MVP, the role check is performed
 via the ``X-User-Role`` request header rather than a verified JWT claim.
 """
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -29,6 +30,34 @@ from backend.schemas import (
 from backend.security import hash_password
 
 router: APIRouter = APIRouter(prefix="/api/admin", tags=["Admin"])
+
+
+def _compact_input_repr(value: Any, *, max_len: int = 120) -> str:
+    """Short, readable representation of the invalid input for import error messages."""
+    if isinstance(value, str):
+        text = value if len(value) <= max_len else f"{value[: max_len - 1]}…"
+        return json.dumps(text, ensure_ascii=False)
+    try:
+        s = json.dumps(value, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        s = repr(value)
+    if len(s) > max_len:
+        return f"{s[: max_len - 1]}…"
+    return s
+
+
+def _format_seed_validation_error(exc: ValidationError) -> str:
+    """Build a plain-text rejection reason with field, message, and submitted value."""
+    parts: list[str] = []
+    for err in exc.errors():
+        loc = err.get("loc") or ()
+        field = ".".join(str(p) for p in loc) if loc else "record"
+        msg = err.get("msg", "Invalid value")
+        if "input" in err:
+            parts.append(f"{field}: {msg}; received: {_compact_input_repr(err['input'])}")
+        else:
+            parts.append(f"{field}: {msg}")
+    return "\n".join(parts)
 
 
 def _require_admin(x_user_role: str | None) -> None:
@@ -142,16 +171,53 @@ def plain_seed(
 
     inserted_items: list[Hardware] = []
     rejected: list[PlainSeedRejection] = []
+    seen_ids: set[int] = set()  # track IDs already queued in this batch
 
     for i, raw in enumerate(raw_payload):
         try:
             if not isinstance(raw, dict):
                 raise ValueError("Record must be a JSON object.")
-            record = HardwareCreate(**raw)
+
+            # Extract optional id from the raw record.
+            raw_id: int | None = None
+            if "id" in raw:
+                try:
+                    raw_id = int(raw["id"])
+                except (TypeError, ValueError):
+                    raw_id = None  # non-integer id → ignored, DB auto-assigns
+
+            if raw_id is not None:
+                # Duplicate within this import batch.
+                if raw_id in seen_ids:
+                    raise ValueError(
+                        f"Duplicate ID {raw_id} in the import payload — "
+                        "only the first occurrence is accepted."
+                    )
+                # ID already present in the database.
+                if db.get(Hardware, raw_id) is not None:
+                    raise ValueError(f"ID {raw_id} already exists in the database.")
+                seen_ids.add(raw_id)
+
+            # Normalise camelCase purchaseDate → snake_case purchase_date.
+            normalized: dict = dict(raw)
+            if "purchaseDate" in normalized and "purchase_date" not in normalized:
+                normalized["purchase_date"] = normalized.pop("purchaseDate")
+
+            record = HardwareCreate(**{k: v for k, v in normalized.items() if k != "id"})
             hw = Hardware(**record.model_dump())
+            if raw_id is not None:
+                hw.id = raw_id
             db.add(hw)
             inserted_items.append(hw)
-        except (ValidationError, ValueError, TypeError) as exc:
+        except ValidationError as exc:
+            rejected.append(
+                PlainSeedRejection(
+                    index=i,
+                    record=raw,
+                    reason=_format_seed_validation_error(exc),
+                )
+            )
+        except (ValueError, TypeError) as exc:
             rejected.append(
                 PlainSeedRejection(
                     index=i,

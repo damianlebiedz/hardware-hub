@@ -91,6 +91,9 @@ export const myRentals = (userId) => request('GET', `/rentals/my?user_id=${userI
 
 // ── AI ────────────────────────────────────────────────────────────────────────
 
+/** Sanitize messy legacy JSON via AI and return proposed changes — does NOT insert. */
+export const aiSeedPreview = (rawArray) => request('POST', '/ai/seed/preview', rawArray)
+
 /** Send messy legacy JSON to the AI seed importer. */
 export const aiSeed = (rawArray) => request('POST', '/ai/seed', rawArray)
 
