@@ -4,20 +4,11 @@ Internal MVP to **rent and maintain company equipment**: hardware catalog, renta
 
 ## Table of contents
 
-- [Live demo (Railway)](#live-demo-railway)
 - [Tech stack](#tech-stack)
 - [Installation & running](#installation--running)
 - [Features](#features)
 - [Implementation status & trade-offs](#implementation-status--trade-offs)
 - [AI development log](#ai-development-log)
-
----
-
-## Live demo (Railway)
-
-**URL:** [https://hardware-hub.up.railway.app](https://hardware-hub.up.railway.app)
-
-**Demo login:** `admin@company.com` / `password` — shared sandbox credentials; not for real or sensitive data.
 
 ---
 
