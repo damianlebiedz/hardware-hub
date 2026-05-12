@@ -2,6 +2,8 @@
 
 Internal MVP to **rent and maintain company equipment**: hardware catalog, rental flow, admin panel, and an **AI layer** (seed import + semantic search). Built as a timeboxed demo of AI-assisted development and AI-native data features.
 
+This is a strictly experimental project designed to ship a functional MVP in the shortest time possible. Developed from scratch using heavy AI assistance in just **4–5 hours**, the codebase reflects intentional trade-offs and tactical "hacks" to prioritize speed and core functionality over long-term architectural polish.
+
 ## Table of contents
 
 - [Tech stack](#tech-stack)
